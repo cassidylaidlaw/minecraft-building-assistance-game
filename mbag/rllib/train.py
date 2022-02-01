@@ -36,7 +36,7 @@ def make_mbag_sacred_config(ex: Experiment):  # noqa
     def sacred_config(_log):  # noqa
         # Environment
         goal_generator = "random"
-        train_goals = True  # False for test set
+        goal_subset: Literal["train", "val", "test"] = "train"
         horizon = 50
         num_players = 1
         height = 5
@@ -48,13 +48,11 @@ def make_mbag_sacred_config(ex: Experiment):  # noqa
             "num_players": num_players,
             "horizon": horizon,
             "world_size": (width, height, depth),
-            "goal_generator": (
-                ALL_GOAL_GENERATORS[goal_generator],
-                {
-                    "data_dir": f"data/{goal_generator}",
-                    "train": train_goals,
-                },
-            ),
+            "goal_generator": ALL_GOAL_GENERATORS[goal_generator],
+            "goal_generator_config": {
+                "data_dir": f"data/{goal_generator}",
+                "subset": goal_subset,
+            },
             "goal_visibility": [True] * num_players,
             "rewards": {
                 "noop": noop_reward,
@@ -75,7 +73,7 @@ def make_mbag_sacred_config(ex: Experiment):  # noqa
         rollout_fragment_length = horizon
         num_training_iters = 500  # noqa: F841
         lr = 1e-3
-        grad_clip = 0.1
+        grad_clip = 10
         gamma = 0.95
         gae_lambda = 0.98
         vf_share_layers = False
@@ -217,8 +215,11 @@ def make_mbag_sacred_config(ex: Experiment):  # noqa
 
         # Distillation
         if "distillation_prediction" in run:
+            validation_input = None
+            validation_num_batches = 1
+            validation_smoothing = 0.9
             config["checkpoint_to_load_policies"] = checkpoint_to_load_policies
-            if checkpoint_to_load_policies is None:
+            if checkpoint_to_load_policies is None and validation_input is None:
                 # Distill a heuristic policy.
                 heuristic = "layer_builder"
                 mbag_agent = ALL_HEURISTIC_AGENTS[heuristic]({}, environment_params)
@@ -235,16 +236,23 @@ def make_mbag_sacred_config(ex: Experiment):  # noqa
                     "policy_mapping_fn"
                 ] = lambda agent_id, to_policy_id=heuristic: to_policy_id
             else:
-                checkpoint_to_load_policies_config = load_trainer_config(
-                    checkpoint_to_load_policies
-                )
+                if checkpoint_to_load_policies is not None:
+                    checkpoint_to_load_policies_config = load_trainer_config(
+                        checkpoint_to_load_policies
+                    )
+                config["validation"] = {
+                    "input": validation_input,
+                    "num_batches": validation_num_batches,
+                    "smoothing": validation_smoothing,
+                }
                 # Add a corresponding distilled policy for each policy in the checkpoint.
                 previous_policy_ids = list(policies.keys())
                 policies_to_train.clear()
                 for policy_id in previous_policy_ids:
-                    policies[policy_id] = checkpoint_to_load_policies_config[
-                        "multiagent"
-                    ]["policies"][policy_id]
+                    if checkpoint_to_load_policies is not None:
+                        policies[policy_id] = checkpoint_to_load_policies_config[
+                            "multiagent"
+                        ]["policies"][policy_id]
                     distill_policy_id = f"{policy_id}_distilled"
                     policies[distill_policy_id] = (
                         MBAG_POLICIES.get(run),

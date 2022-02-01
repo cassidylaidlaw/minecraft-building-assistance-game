@@ -542,7 +542,7 @@ class MbagTransformerModel(MbagModel, nn.Module):
                     block_id_in_size if layer_index == 0 else self.hidden_size,
                     self.block_id_space.n
                     if layer_index == self.num_block_id_layers - 1
-                    else self.hidden_channels,
+                    else self.hidden_size,
                 )
             )
             if layer_index < self.num_block_id_layers - 1:

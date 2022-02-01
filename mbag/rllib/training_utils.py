@@ -59,7 +59,10 @@ def load_trainer(
 ) -> Trainer:
     config = load_trainer_config(checkpoint_path)
     config_updates.setdefault("num_workers", 0)
-    config.update(config_updates)
+    config = Trainer.merge_trainer_configs(
+        config, config_updates, _allow_unknown_configs=True
+    )
+    print(config)
 
     # Create the Trainer from config.
     if isinstance(run, str):

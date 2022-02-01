@@ -24,7 +24,8 @@ def sacred_config():
     run = "PPO"  # noqa: F841
     checkpoint = ""  # noqa: F841
     episodes = 100  # noqa: F841
-    experiment_name = ""  # noqa: F841
+    goal_subset = "train"
+    experiment_name = f"{goal_subset}"  # noqa: F841
 
     num_workers = 4
     output_max_file_size = 64 * 1024 * 1024
@@ -34,6 +35,11 @@ def sacred_config():
         "evaluation_num_episodes": 1,
         "output_max_file_size": output_max_file_size,
         "evaluation_config": {},
+        "env_config": {
+            "goal_generator_config": {
+                "subset": goal_subset,
+            }
+        },
     }
 
 
@@ -52,10 +58,8 @@ def main(
     )
 
     time_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    if not experiment_name.endswith("_") and experiment_name != "":
-        experiment_name += "_"
     out_dir = os.path.join(
-        os.path.dirname(checkpoint), f"rollouts_{experiment_name}{time_str}"
+        os.path.dirname(checkpoint), f"rollouts_{experiment_name}_{time_str}"
     )
     config_updates.update(
         {

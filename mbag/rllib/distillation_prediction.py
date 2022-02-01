@@ -6,10 +6,13 @@ for predicting the next action given past actions.
 import logging
 import gym
 import numpy as np
+import torch
+from typing import Dict, List, Optional, Type, Union, Callable, cast
 from ray.rllib.execution.concurrency_ops import Concurrently, Dequeue, Enqueue
 from ray.rllib.execution.learner_thread import LearnerThread
 from ray.rllib.models.torch.attention_net import AttentionWrapper
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
+from ray.rllib.offline.json_reader import JsonReader
 from ray.rllib.utils.sgd import minibatches
 from ray.tune.registry import register_trainable
 from ray.rllib.execution.common import (
@@ -17,9 +20,6 @@ from ray.rllib.execution.common import (
     STEPS_TRAINED_COUNTER,
     _get_shared_metrics,
 )
-import torch
-from typing import Dict, List, Type, Union, Callable, cast
-
 from ray.rllib.agents import with_common_config
 from ray.rllib.agents.trainer_template import build_trainer
 from ray.rllib.evaluation.worker_set import WorkerSet
@@ -89,6 +89,16 @@ DEFAULT_CONFIG = with_common_config(
         # Whether to fake GPUs (using CPUs).
         # Set this to True for debugging on non-GPU machines (set `num_gpus` > 0).
         "_fake_gpus": False,
+        # Validation settings (for testing cross entropy on a held-out set).
+        "validation": {
+            # Input directory for validation data.
+            "input": None,
+            # Number of batches to validate on each iteration.
+            "num_batches": 1,
+            # Report the validation cross entropy as a moving average with this
+            # smoothing parameter (useful for Tune).
+            "smoothing": 0,
+        },
     }
 )
 
@@ -110,7 +120,129 @@ def validate_config(config: TrainerConfigDict) -> None:
         raise ValueError("only PyTorch is supported")
 
 
-class DistillationPredictionPolicyType(TorchPolicy):
+def prepare_teacher_batch(
+    policy: TorchPolicy,
+    model: ModelV2,
+    batch: SampleBatch,
+) -> SampleBatch:
+    # Replace initial state from teacher model with initial state from student model.
+    for state_index, initial_state in enumerate(model.get_initial_state()):
+        if isinstance(initial_state, np.ndarray):
+            initial_state_tensor = torch.from_numpy(initial_state)
+        else:
+            initial_state_tensor = initial_state
+        batch[f"state_in_{state_index}"] = initial_state_tensor[None].repeat(
+            (batch["state_in_0"].shape[0], 1)
+        )
+
+    # If the model is a transformer, we need to add additional state to the batch.
+    if isinstance(model, AttentionWrapper):
+        for data_col, view_req in policy.view_requirements.items():
+            if data_col.startswith("state_in_"):
+                batch[data_col] = np.zeros(
+                    (
+                        len(batch["seq_lens"]),
+                        view_req.shift_to - view_req.shift_from + 1,
+                    )
+                    + view_req.space.shape
+                )
+
+    # TODO: is this still needed?
+    # batch.dont_check_lens = True
+
+    return batch
+
+
+def get_reduce_mean_valid(
+    batch: SampleBatch, model: TorchModelV2, logits: torch.Tensor, state: torch.Tensor
+) -> Callable[[torch.Tensor], torch.Tensor]:
+    # RNN case: Mask away 0-padded chunks at end of time axis.
+    if state:
+        batch_size = len(batch["seq_lens"])
+        max_seq_len = logits.shape[0] // batch_size
+        mask = sequence_mask(
+            batch["seq_lens"], max_seq_len, time_major=model.is_time_major()
+        )
+        mask = torch.reshape(mask, [-1])
+        num_valid = torch.sum(mask)
+
+        def reduce_mean_valid(t):
+            return torch.sum(t[mask]) / num_valid
+
+    # non-RNN case: No masking.
+    else:
+        mask = None
+        reduce_mean_valid = torch.mean
+
+    return reduce_mean_valid
+
+
+class ValidationMixin(object):
+    validation_reader: Optional[JsonReader]
+    _validation_cross_entropy: Optional[float]
+    _smoothed_validation_cross_entropy: Optional[float]
+
+    def __init__(
+        self,
+        validation_input: Optional[str],
+        validation_num_batches: int,
+        validation_smoothing: float,
+    ):
+        if validation_input is None:
+            self.validation_reader = None
+        else:
+            self.validation_reader = JsonReader(validation_input)
+        self.validation_num_batches = validation_num_batches
+        self.validation_smoothing = validation_smoothing
+        self._smoothed_validation_cross_entropy = None
+        self._validation_cross_entropy = None
+
+    def get_validation_batch(self) -> Optional[SampleBatch]:
+        if self.validation_reader is None:
+            return None
+
+        batches: List[SampleBatch] = []
+        for _ in range(self.validation_num_batches):
+            batch = self.validation_reader.next()
+            if isinstance(batch, MultiAgentBatch):
+                batch = next(iter(batch.policy_batches.values()))
+            batches.append(batch)
+        return cast(
+            SampleBatch,
+            cast(TorchPolicy, self)._lazy_tensor_dict(
+                SampleBatch.concat_samples(batches)
+            ),
+        )
+
+    def calculate_validation_loss(
+        self,
+        model: TorchModelV2,
+        dist_class: Type[TorchDistributionWrapper],
+    ):
+        validation_batch = self.get_validation_batch()
+        if validation_batch is None:
+            return
+
+        policy = cast(DistillationPredictionPolicyType, self)
+        validation_batch = prepare_teacher_batch(policy, model, validation_batch)
+        logits, state = model.from_batch(validation_batch)
+        action_dist = dist_class(logits.detach(), model)
+        cross_entropy = -action_dist.logp(validation_batch[SampleBatch.ACTIONS])
+
+        reduce_mean_valid = get_reduce_mean_valid(
+            validation_batch, model, logits, state
+        )
+        self._validation_cross_entropy = float(reduce_mean_valid(cross_entropy).item())
+        if self._smoothed_validation_cross_entropy is None:
+            self._smoothed_validation_cross_entropy = self._validation_cross_entropy
+        else:
+            self._smoothed_validation_cross_entropy = (
+                self._smoothed_validation_cross_entropy * self.validation_smoothing
+                + self._validation_cross_entropy * (1 - self.validation_smoothing)
+            )
+
+
+class DistillationPredictionPolicyType(TorchPolicy, ValidationMixin):
     model: TorchModelV2
 
     # Cross-entropy during the first epoch of SGD. This is a more reliable metric
@@ -125,54 +257,15 @@ class DistillationPredictionPolicyType(TorchPolicy):
 
 def distillation_loss(
     policy: DistillationPredictionPolicyType,
-    model: ModelV2,
+    model: TorchModelV2,
     dist_class: Type[TorchDistributionWrapper],
     train_batch: SampleBatch,
 ) -> Union[TensorType, List[TensorType]]:
-    # Replace initial state from teacher model with initial state from student model.
-    for state_index, initial_state in enumerate(model.get_initial_state()):
-        if isinstance(initial_state, np.ndarray):
-            initial_state_tensor = torch.from_numpy(initial_state)
-        else:
-            initial_state_tensor = initial_state
-        train_batch[f"state_in_{state_index}"] = initial_state_tensor[None].repeat(
-            (train_batch["state_in_0"].shape[0], 1)
-        )
-
-    # If the model is a transformer, we need to add additional state to the batch.
-    if isinstance(model, AttentionWrapper):
-        for data_col, view_req in policy.view_requirements.items():
-            if data_col.startswith("state_in_"):
-                train_batch[data_col] = np.zeros(
-                    (
-                        len(train_batch["seq_lens"]),
-                        view_req.shift_to - view_req.shift_from + 1,
-                    )
-                    + view_req.space.shape
-                )
-
-    # TODO: is this still an issue?
-    # train_batch.dont_check_lens = True
+    train_batch = prepare_teacher_batch(policy, model, train_batch)
     logits, state = model.from_batch(train_batch, is_training=True)
     action_dist = dist_class(logits, model)
 
-    # RNN case: Mask away 0-padded chunks at end of time axis.
-    if state:
-        batch_size = len(train_batch["seq_lens"])
-        max_seq_len = logits.shape[0] // batch_size
-        mask = sequence_mask(
-            train_batch["seq_lens"], max_seq_len, time_major=model.is_time_major()
-        )
-        mask = torch.reshape(mask, [-1])
-        num_valid = torch.sum(mask)
-
-        def reduce_mean_valid(t):
-            return torch.sum(t[mask]) / num_valid
-
-    # non-RNN case: No masking.
-    else:
-        mask = None
-        reduce_mean_valid = torch.mean
+    reduce_mean_valid = get_reduce_mean_valid(train_batch, model, logits, state)
 
     cross_entropy = -action_dist.logp(train_batch[SampleBatch.ACTIONS])
     total_loss = reduce_mean_valid(cross_entropy)
@@ -196,9 +289,19 @@ def distillation_loss(
 def distillation_stats(
     policy: DistillationPredictionPolicyType, train_batch: SampleBatch
 ) -> Dict[str, TensorType]:
+    dist_class = cast(Type[TorchDistributionWrapper], policy.dist_class)
+    policy.calculate_validation_loss(policy.model, dist_class)
+    validation_stats = {}
+    if policy._validation_cross_entropy is not None:
+        validation_stats["cross_entropy"] = policy._validation_cross_entropy
+    if policy._smoothed_validation_cross_entropy is not None:
+        validation_stats[
+            "smoothed_cross_entropy"
+        ] = policy._smoothed_validation_cross_entropy
     return {
         "cross_entropy": policy._cross_entropy,
         "total_loss": policy._total_loss,
+        "validation": validation_stats,
     }
 
 
@@ -209,6 +312,14 @@ def setup_mixins(
     config: TrainerConfigDict,
 ) -> None:
     LearningRateSchedule.__init__(policy, config["lr"], config["lr_schedule"])
+
+    validation_config = config["validation"]
+    ValidationMixin.__init__(
+        policy,  # type: ignore
+        validation_config["input"],
+        validation_config["num_batches"],
+        validation_config["smoothing"],
+    )
 
 
 # Build a child class of `TorchPolicy`, given the custom functions defined
@@ -221,7 +332,7 @@ DistillationPredictionPolicy = build_policy_class(
     stats_fn=distillation_stats,
     extra_grad_process_fn=apply_grad_clipping,
     before_loss_init=setup_mixins,
-    mixins=[LearningRateSchedule],
+    mixins=[LearningRateSchedule, ValidationMixin],
 )
 
 

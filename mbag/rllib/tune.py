@@ -28,13 +28,16 @@ def add_tune_config(
 ):
     train_batch_size_max = 20000
     sgd_minibatch_size_max = 4000
+    num_sgd_iter_max = 10
+    lr_min = 1e-5
+    lr_max = 1e-1
 
     config.update(
         {
             "train_batch_size": tune.qrandint(1000, train_batch_size_max, 1000),
             "sgd_minibatch_size": tune.qrandint(100, sgd_minibatch_size_max, 100),
-            "num_sgd_iter": tune.randint(1, 10),
-            "lr": tune.loguniform(1e-5, 1e-1),
+            "num_sgd_iter": tune.randint(1, num_sgd_iter_max + 1),
+            "lr": tune.loguniform(lr_min, lr_max),
             "evaluation_interval": None,
         }
     )
@@ -87,7 +90,13 @@ def add_tune_config(
 
     time_attr = "time_total_s"
     if "distillation_prediction" in run:
-        tune_metric = f"info/learner/{policies_to_train[0]}/initial_cross_entropy"
+        if config["validation"]["input"] is not None:
+            tune_metric = (
+                f"info/learner/{policies_to_train[0]}/"
+                "learner_stats/validation/smoothed_cross_entropy"
+            )
+        else:
+            tune_metric = f"info/learner/{policies_to_train[0]}/initial_cross_entropy"
         mode = "min"
     else:
         tune_metric = "custom_metrics/goal_similarity_mean"
