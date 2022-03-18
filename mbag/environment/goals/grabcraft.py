@@ -5,6 +5,7 @@ import random
 import logging
 import numpy as np
 import sys
+import heapq
 from typing import Dict, List, Optional, Tuple
 
 from typing_extensions import TypedDict, Literal
@@ -349,3 +350,63 @@ class CroppedGrabcraftGoalGenerator(GrabcraftGoalGenerator):
             os.path.join(save_dir, str(structure_id) + "_crop.metadata.json"), "w+"
         ) as f:
             f.write(metadata_json_str)
+
+
+class SeamCarvingGrabcraftGoalGenerator(GrabcraftGoalGenerator):
+    config: GrabcraftGoalConfig
+
+    def generate_goal(self, size: WorldSize) -> MinecraftBlocks:
+        structure_id = random.choice(list(self.structure_metadata.keys()))
+        structure = self._get_structure(structure_id)
+        assert structure is not None
+
+        goal_blocks = np.copy(structure.blocks)
+        if structure.size[0] > size[0]:
+            h: List[Tuple[float, int]] = []
+            goal_size = goal_blocks.shape
+            for i in range(goal_size[0]):
+                cut = MinecraftBlocks((1, goal_size[1], goal_size[2]))
+                cut.blocks = goal_blocks[i, :, :]
+                heapq.heappush(h, (cut.density(), i))
+
+            cut_idx = [heapq.heappop(h)[1] for _ in range(goal_size[0] - size[0])]
+            print(cut_idx)
+            goal_blocks = np.delete(goal_blocks, cut_idx, axis=0)
+
+        if structure.size[1] > size[1]:
+            h = []
+            goal_size = goal_blocks.shape
+            for i in range(goal_size[1]):
+                cut = MinecraftBlocks((goal_size[0], 1, goal_size[2]))
+                cut.blocks = goal_blocks[:, i, :]
+                heapq.heappush(h, (cut.density(), i))
+
+            cut_idx = [heapq.heappop(h)[1] for _ in range(goal_size[1] - size[1])]
+            print(cut_idx)
+            goal_blocks = np.delete(goal_blocks, cut_idx, axis=1)
+
+        if structure.size[2] > size[2]:
+            h = []
+            goal_size = goal_blocks.shape
+            for i in range(goal_size[2]):
+                cut = MinecraftBlocks((goal_size[0], goal_size[1], 1))
+                cut.blocks = goal_blocks[:, :, i]
+                heapq.heappush(h, (cut.density(), i))
+
+            cut_idx = [heapq.heappop(h)[1] for _ in range(goal_size[2] - size[2])]
+            print(cut_idx)
+            goal_blocks = np.delete(goal_blocks, cut_idx, axis=2)
+
+        # Randomly place structure within world.
+        carved_struct = MinecraftBlocks(size)
+        carved_struct.blocks = goal_blocks
+        goal = GoalGenerator.randomly_place_structure(carved_struct, size)
+
+        # Add a layer of dirt at the bottom of the structure wherever there's still
+        # air.
+        bottom_layer = goal.blocks[:, 0, :]
+        bottom_layer[bottom_layer == MinecraftBlocks.AIR] = MinecraftBlocks.NAME2ID[
+            "dirt"
+        ]
+
+        return goal
