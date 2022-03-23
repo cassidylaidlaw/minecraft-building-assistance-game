@@ -204,7 +204,12 @@ def test_generate_crop_json():
 
 
 def test_carving_generator():
-    goal_generator = SeamCarvingGrabcraftGoalGenerator({"subset": "train"})
+    goal_generator = SeamCarvingGrabcraftGoalGenerator(
+        {
+            "subset": "train",
+            "use_limited_block_set": True,
+        }
+    )
     size: WorldSize
     for size in [(5, 5, 5), (8, 8, 8), (10, 10, 10)]:
         blocks = goal_generator.generate_goal(size)
