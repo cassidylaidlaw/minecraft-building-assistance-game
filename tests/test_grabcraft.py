@@ -211,7 +211,7 @@ def test_carving_generator():
         }
     )
     size: WorldSize
-    for size in [(5, 5, 5), (8, 8, 8), (10, 10, 10)]:
+    for size in [(5, 5, 5), (8, 8, 8), (10, 10, 10), (50, 50, 50)]:
         blocks = goal_generator.generate_goal(size)
         assert blocks.size == size
 
