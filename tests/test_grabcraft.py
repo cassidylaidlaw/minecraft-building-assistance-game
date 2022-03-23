@@ -203,6 +203,15 @@ def test_generate_crop_json():
     assert episode_info.cumulative_reward > 0
 
 
+def test_carving_generator():
+    goal_generator = SeamCarvingGrabcraftGoalGenerator({"subset": "train"})
+    size: WorldSize
+    for size in [(5, 5, 5), (8, 8, 8), (10, 10, 10)]:
+        blocks = goal_generator.generate_goal(size)
+        assert blocks.size == size
+
+
+@pytest.mark.xfail(strict=False)
 def test_carving_generator_in_malmo():
     evaluator = MbagEvaluator(
         {

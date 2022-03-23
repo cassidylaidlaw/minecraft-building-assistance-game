@@ -370,7 +370,6 @@ class SeamCarvingGrabcraftGoalGenerator(GrabcraftGoalGenerator):
                 heapq.heappush(h, (cut.density(), i))
 
             cut_idx = [heapq.heappop(h)[1] for _ in range(goal_size[0] - size[0])]
-            print(cut_idx)
             goal_blocks = np.delete(goal_blocks, cut_idx, axis=0)
 
         if structure.size[1] > size[1]:
@@ -382,7 +381,6 @@ class SeamCarvingGrabcraftGoalGenerator(GrabcraftGoalGenerator):
                 heapq.heappush(h, (cut.density(), i))
 
             cut_idx = [heapq.heappop(h)[1] for _ in range(goal_size[1] - size[1])]
-            print(cut_idx)
             goal_blocks = np.delete(goal_blocks, cut_idx, axis=1)
 
         if structure.size[2] > size[2]:
@@ -394,7 +392,6 @@ class SeamCarvingGrabcraftGoalGenerator(GrabcraftGoalGenerator):
                 heapq.heappush(h, (cut.density(), i))
 
             cut_idx = [heapq.heappop(h)[1] for _ in range(goal_size[2] - size[2])]
-            print(cut_idx)
             goal_blocks = np.delete(goal_blocks, cut_idx, axis=2)
 
         # Randomly place structure within world.
