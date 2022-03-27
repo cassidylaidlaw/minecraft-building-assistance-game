@@ -6,7 +6,7 @@ import logging
 import numpy as np
 import sys
 import heapq
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 
 from typing_extensions import TypedDict, Literal
 
@@ -354,6 +354,38 @@ class CroppedGrabcraftGoalGenerator(GrabcraftGoalGenerator):
 
 class SeamCarvingGrabcraftGoalGenerator(GrabcraftGoalGenerator):
     config: GrabcraftGoalConfig
+
+    @staticmethod
+    def _get_blockwise_average_3D(A: Any, S: Any) -> Any:
+        m, n, r = np.array(A.shape) // S
+        return A.reshape(m, S[0], n, S[1], r, S[2]).mean((1, 3, 5))
+
+    @staticmethod
+    def _generate_neighbors_map(blocks: MinecraftBlocks) -> Any:
+        neighbors_count = np.zeros(blocks.blocks.shape)
+        padded_blocks = np.pad(
+            blocks.blocks,
+            pad_width=[
+                (1, 1),
+                (1, 1),
+                (1, 1),
+            ],
+            mode="constant",
+            constant_values=MinecraftBlocks.AIR,
+        )
+
+        for x in range(1, neighbors_count.shape[0] + 1):
+            for y in range(1, neighbors_count.shape[1] + 1):
+                for z in range(1, neighbors_count.shape[2] + 1):
+                    neighbors_count[x-1, y-1, z-1] = np.count_nonzero(
+                        padded_blocks[
+                            x-1:x+2,
+                            y-1:y+2,
+                            z-1:z+2
+                        ]
+                    )
+
+        return neighbors_count
 
     def generate_goal(self, size: WorldSize) -> MinecraftBlocks:
         structure_id = random.choice(list(self.structure_metadata.keys()))

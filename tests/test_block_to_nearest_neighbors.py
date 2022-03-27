@@ -2,6 +2,7 @@ import numpy as np
 import itertools
 
 from mbag.environment.blocks import MinecraftBlocks
+from mbag.environment.goals.grabcraft import CroppedGrabcraftGoalGenerator, SeamCarvingGrabcraftGoalGenerator
 
 
 def test_not_same():
@@ -44,3 +45,11 @@ def test_edges():
         ] = cobble
         blocks.blocks[block_position] = MinecraftBlocks.AIR
         assert blocks.block_to_nearest_neighbors(block_position) == cobble
+
+
+def test_neighboring_blocks():
+    generator = CroppedGrabcraftGoalGenerator({})
+    generator2 = SeamCarvingGrabcraftGoalGenerator({})
+    while True:
+        blocks = generator.generate_goal((10, 10, 10))
+        neighboring_blocks = generator2._generate_neighbors_map(blocks)
