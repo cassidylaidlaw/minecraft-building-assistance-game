@@ -6,6 +6,8 @@ import logging
 import numpy as np
 import sys
 import heapq
+import math
+from scipy import ndimage
 from typing import Dict, List, Optional, Tuple, Any
 
 from typing_extensions import TypedDict, Literal
@@ -104,28 +106,21 @@ class GrabcraftGoalGenerator(GoalGenerator):
 
     def _get_structure_size(self, structure_json: StructureJson) -> WorldSize:
         max_x, max_y, max_z = 0, 0, 0
-        min_x, min_y, min_z = sys.maxsize, sys.maxsize, sys.maxsize
 
         for y_str, y_layer in structure_json.items():
             y = int(y_str)
             if y > max_y:
                 max_y = y
-            if y < min_y:
-                min_y = y
             for x_str, x_layer in y_layer.items():
                 x = int(x_str)
                 if x > max_x:
                     max_x = x
-                if x < min_x:
-                    min_x = x
                 for z_str, block in x_layer.items():
                     z = int(z_str)
                     if z > max_z:
                         max_z = z
-                    if z < min_z:
-                        min_z = z
 
-        return max_x - min_x + 1, max_y - min_y + 1, max_z - min_z + 1
+        return max_x + 1, max_y + 1, max_z + 1
 
     def generate_goal(self, size: WorldSize) -> MinecraftBlocks:
         success = False
@@ -358,6 +353,7 @@ class SeamCarvingGrabcraftGoalGenerator(GrabcraftGoalGenerator):
     @staticmethod
     def _get_blockwise_average_3D(A: Any, S: Any) -> Any:
         m, n, r = np.array(A.shape) // S
+        print(A.reshape(m, S[0], n, S[1], r, S[2]))
         return A.reshape(m, S[0], n, S[1], r, S[2]).mean((1, 3, 5))
 
     @staticmethod
@@ -387,45 +383,57 @@ class SeamCarvingGrabcraftGoalGenerator(GrabcraftGoalGenerator):
 
         return neighbors_count
 
+    @staticmethod
+    def _calculate_conductivities(blocks: MinecraftBlocks) -> Any:
+        padded_blocks = np.pad(
+            blocks.blocks,
+            pad_width=[
+                (1, 1),
+                (1, 1),
+                (1, 1),
+            ],
+            mode="constant",
+            constant_values=MinecraftBlocks.AIR,
+        )
+
+        padded_blocks[padded_blocks != MinecraftBlocks.AIR] = 1
+
+        padded_conductivites = ndimage.convolve(
+            padded_blocks,
+            np.array(
+                [
+                    [[0, 0, 0],
+                    [0, 1, 0],
+                    [0, 0, 0]],
+                    [[0, 1, 0],
+                    [1, 1, 1],
+                    [0, 1, 0]],
+                    [[0, 0, 0],
+                    [0, 1, 0],
+                    [0, 0, 0]]
+                ]),
+        )
+
+        return padded_conductivites[1:-1, 1:-1, 1:-1]
+
+    @staticmethod
+    # calculate the differences between the number of blocks
+    def _calculate_conductivities_diffs(first_block: MinecraftBlocks, second_block: MinecraftBlocks) -> int:
+
+        first_conductivities_labels, first_conductivities_count = ndimage.label(first_block.blocks)
+        second_conductivities_labels, second_conductivities_count = ndimage.label(second_block.blocks)
+
+        return second_conductivities_count - first_conductivities_count
+
     def generate_goal(self, size: WorldSize) -> MinecraftBlocks:
         structure_id = random.choice(list(self.structure_metadata.keys()))
         structure = self._get_structure(structure_id)
         assert structure is not None
 
         goal_blocks = np.copy(structure.blocks)
-        if structure.size[0] > size[0]:
-            h: List[Tuple[float, int]] = []
-            goal_size = goal_blocks.shape
-            for i in range(goal_size[0]):
-                cut = MinecraftBlocks((1, goal_size[1], goal_size[2]))
-                cut.blocks = goal_blocks[i, :, :]
-                heapq.heappush(h, (cut.density(), i))
-
-            cut_idx = [heapq.heappop(h)[1] for _ in range(goal_size[0] - size[0])]
-            goal_blocks = np.delete(goal_blocks, cut_idx, axis=0)
-
-        if structure.size[1] > size[1]:
-            h = []
-            goal_size = goal_blocks.shape
-            for i in range(goal_size[1]):
-                cut = MinecraftBlocks((goal_size[0], 1, goal_size[2]))
-                cut.blocks = goal_blocks[:, i, :]
-                heapq.heappush(h, (cut.density(), i))
-
-            cut_idx = [heapq.heappop(h)[1] for _ in range(goal_size[1] - size[1])]
-            goal_blocks = np.delete(goal_blocks, cut_idx, axis=1)
-
-        if structure.size[2] > size[2]:
-            h = []
-            goal_size = goal_blocks.shape
-            for i in range(goal_size[2]):
-                cut = MinecraftBlocks((goal_size[0], goal_size[1], 1))
-                cut.blocks = goal_blocks[:, :, i]
-                heapq.heappush(h, (cut.density(), i))
-
-            cut_idx = [heapq.heappop(h)[1] for _ in range(goal_size[2] - size[2])]
-            goal_blocks = np.delete(goal_blocks, cut_idx, axis=2)
-
+        while structure.size[0] > size[0] or structure.size[1] > size[1] or structure.size[2] > size[2]:
+            print("YO")
+        
         # Randomly place structure within world.
         carved_struct = MinecraftBlocks(size)
         carved_struct.blocks = goal_blocks

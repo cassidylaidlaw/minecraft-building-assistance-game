@@ -30,6 +30,29 @@ def test_air():
     assert blocks.block_to_nearest_neighbors((1, 1, 1)) == cobble
 
 
+def test_majority():
+    blocks = MinecraftBlocks((3, 3, 3))
+    dirt = MinecraftBlocks.NAME2ID["dirt"]
+    cobble = MinecraftBlocks.NAME2ID["cobblestone"]
+    blocks.blocks[:] = MinecraftBlocks.AIR
+    blocks.blocks[:, 0, :] = dirt
+    blocks.blocks[:, 2, :] = cobble
+    blocks.blocks[2, 1, 1] = cobble
+    assert blocks.block_to_nearest_neighbors((1, 1, 1)) == cobble
+
+
+def test_large():
+    blocks = RandomGoalGenerator({}).generate_goal((10, 10, 10))
+    blocks.blocks[4:6, 4, 5] = MinecraftBlocks.AUTO
+    blocks.block_to_nearest_neighbors((4, 4, 5))
+
+
+def test_many_auto_blocks():
+    blocks = RandomGoalGenerator({}).generate_goal((10, 10, 10))
+    blocks.blocks[4:7, 4:7, 4:7] = MinecraftBlocks.AUTO
+    blocks.block_to_nearest_neighbors((5, 5, 5))
+
+
 def test_edges():
     blocks = MinecraftBlocks((3, 3, 3))
     dirt = MinecraftBlocks.NAME2ID["dirt"]
@@ -50,6 +73,11 @@ def test_edges():
 def test_neighboring_blocks():
     generator = CroppedGrabcraftGoalGenerator({})
     generator2 = SeamCarvingGrabcraftGoalGenerator({})
-    while True:
-        blocks = generator.generate_goal((10, 10, 10))
-        neighboring_blocks = generator2._generate_neighbors_map(blocks)
+
+    blocks = generator.generate_goal((10, 10, 10))
+    neighboring_blocks = generator2._generate_neighbors_map(blocks)
+    print(neighboring_blocks)
+    downsized = generator2._get_blockwise_average_3D(blocks.blocks, (2, 2, 2))
+    print(downsized)
+
+    assert downsized.shape == (5, 5, 5)

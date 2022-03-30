@@ -401,16 +401,20 @@ class MinecraftBlocks(object):
                         real_y - 1 : real_y + 2,
                         real_z - 1 : real_z + 2,
                     ],
-                    obj=real_x * self.size[1] * self.size[2]
-                    + real_y * self.size[1]
-                    + real_z,
+                    obj=13,
                 ),
                 return_counts=True,
             )
         ).T
-        frequencies = frequencies[np.argsort(frequencies[:, 1])]
 
-        return int(frequencies[0][0])
+        frequencies = frequencies[np.argsort(frequencies[:, 1])]
+        frequencies = frequencies[frequencies[:, 0] != 0]
+        frequencies = frequencies[frequencies[:, 0] != 28]
+
+        if len(frequencies) == 0:
+            return 0
+
+        return int(frequencies[-1][0])
 
     def fill_from_crop(
         self, initial_struct: "MinecraftBlocks", coords: Tuple[int, int, int]
