@@ -2,7 +2,7 @@ import numpy as np
 import itertools
 
 from mbag.environment.blocks import MinecraftBlocks
-from mbag.environment.goals.grabcraft import CroppedGrabcraftGoalGenerator, SeamCarvingGrabcraftGoalGenerator
+from mbag.environment.goals.grabcraft import CroppedGrabcraftGoalGenerator
 
 
 def test_not_same():
@@ -42,13 +42,13 @@ def test_majority():
 
 
 def test_large():
-    blocks = RandomGoalGenerator({}).generate_goal((10, 10, 10))
+    blocks = CroppedGrabcraftGoalGenerator({}).generate_goal((10, 10, 10))
     blocks.blocks[4:6, 4, 5] = MinecraftBlocks.AUTO
     blocks.block_to_nearest_neighbors((4, 4, 5))
 
 
 def test_many_auto_blocks():
-    blocks = RandomGoalGenerator({}).generate_goal((10, 10, 10))
+    blocks = CroppedGrabcraftGoalGenerator({}).generate_goal((10, 10, 10))
     blocks.blocks[4:7, 4:7, 4:7] = MinecraftBlocks.AUTO
     blocks.block_to_nearest_neighbors((5, 5, 5))
 
@@ -68,16 +68,3 @@ def test_edges():
         ] = cobble
         blocks.blocks[block_position] = MinecraftBlocks.AIR
         assert blocks.block_to_nearest_neighbors(block_position) == cobble
-
-
-def test_neighboring_blocks():
-    generator = CroppedGrabcraftGoalGenerator({})
-    generator2 = SeamCarvingGrabcraftGoalGenerator({})
-
-    blocks = generator.generate_goal((10, 10, 10))
-    neighboring_blocks = generator2._generate_neighbors_map(blocks)
-    print(neighboring_blocks)
-    downsized = generator2._get_blockwise_average_3D(blocks.blocks, (2, 2, 2))
-    print(downsized)
-
-    assert downsized.shape == (5, 5, 5)

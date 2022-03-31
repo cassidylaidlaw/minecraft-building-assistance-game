@@ -216,11 +216,10 @@ def test_carving_generator():
         assert blocks.size == size
 
 
-@pytest.mark.xfail(strict=False)
 def test_carving_generator_in_malmo():
     evaluator = MbagEvaluator(
         {
-            "world_size": (15, 10, 15),
+            "world_size": (12, 12, 12),
             "num_players": 1,
             "horizon": 1000,
             "goal_generator": SeamCarvingGrabcraftGoalGenerator,
@@ -228,6 +227,7 @@ def test_carving_generator_in_malmo():
                 "data_dir": "data/grabcraft",
                 "subset": "train",
                 "use_limited_block_set": True,
+                "density_cost_weight": 0.8,
             },
             "goal_visibility": [True],
             "malmo": {
