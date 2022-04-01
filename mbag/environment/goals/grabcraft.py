@@ -4,6 +4,7 @@ import json
 import random
 import logging
 import numpy as np
+import sys
 from scipy import ndimage  # type: ignore
 from typing import Dict, List, Optional, Tuple, Any
 
@@ -101,23 +102,38 @@ class GrabcraftGoalGenerator(GoalGenerator):
 
             self.structure_metadata[structure_id] = metadata
 
-    def _get_structure_size(self, structure_json: StructureJson) -> WorldSize:
+    def _get_structure_bounds(
+        self, structure_json: StructureJson
+    ) -> Tuple[int, int, int, int, int, int]:
         max_x, max_y, max_z = 0, 0, 0
+        min_x, min_y, min_z = sys.maxsize, sys.maxsize, sys.maxsize
 
         for y_str, y_layer in structure_json.items():
             y = int(y_str)
             if y > max_y:
                 max_y = y
+            if y < min_y:
+                min_y = y
             for x_str, x_layer in y_layer.items():
                 x = int(x_str)
                 if x > max_x:
                     max_x = x
+                if x < min_x:
+                    min_x = x
                 for z_str, block in x_layer.items():
                     z = int(z_str)
                     if z > max_z:
                         max_z = z
+                    if z < min_z:
+                        min_z = z
 
-        return max_x + 1, max_y + 1, max_z + 1
+        return min_x, max_x, min_y, max_y, min_z, max_z
+
+    def _get_structure_size(self, structure_json: StructureJson) -> WorldSize:
+        min_x, max_x, min_y, max_y, min_z, max_z = self._get_structure_bounds(
+            structure_json
+        )
+        return max_x - min_x + 1, max_y - min_y + 1, max_z - min_z + 1
 
     def generate_goal(self, size: WorldSize) -> MinecraftBlocks:
         success = False
@@ -160,7 +176,8 @@ class GrabcraftGoalGenerator(GoalGenerator):
         ) as structure_file:
             structure_json: StructureJson = json.load(structure_file)
 
-        structure_size = self._get_structure_size(structure_json)
+        bounds = self._get_structure_bounds(structure_json)
+        structure_size = (bounds[1] + 1, bounds[3] + 1, bounds[5] + 1)
         structure = MinecraftBlocks(structure_size)
         structure.blocks[:] = MinecraftBlocks.AIR
         structure.block_states[:] = 0
@@ -248,7 +265,7 @@ class CroppedGrabcraftGoalGenerator(GrabcraftGoalGenerator):
             y_range = 0 if self.config["tethered_to_ground"] else structure.size[1] - 1
             z_range = structure.size[2] - 1
 
-            for retry_index in range(retries):
+            for _ in range(retries):
                 rand_crop = MinecraftBlocks(crop_size)
                 rand_crop.blocks[:] = MinecraftBlocks.AIR
                 rand_crop.block_states[:] = 0
@@ -274,7 +291,7 @@ class CroppedGrabcraftGoalGenerator(GrabcraftGoalGenerator):
     def generate_goal(
         self, size: WorldSize, save_crop: bool = False
     ) -> MinecraftBlocks:
-        structure, crop, location = self._generate_crop(size)
+        structure_id, crop, location = self._generate_crop(size)
 
         # Randomly place structure within world.
         goal = GoalGenerator.randomly_place_structure(crop, size)
@@ -287,7 +304,7 @@ class CroppedGrabcraftGoalGenerator(GrabcraftGoalGenerator):
         ]
 
         if save_crop:
-            self.save_crop_as_json(structure, crop.size, location)
+            self.save_crop_as_json(structure_id, crop.size, location)
 
         return goal
 
