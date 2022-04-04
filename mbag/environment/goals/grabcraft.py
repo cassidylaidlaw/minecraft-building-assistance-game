@@ -395,12 +395,14 @@ class SeamCarvingGrabcraftGoalGenerator(GrabcraftGoalGenerator):
 
         padded_conductivites = ndimage.convolve(
             padded_blocks,
-            np.array(
-                [
-                    [[0, 0, 0], [0, 1, 0], [0, 0, 0]],
-                    [[0, 1, 0], [1, 1, 1], [0, 1, 0]],
-                    [[0, 0, 0], [0, 1, 0], [0, 0, 0]],
-                ]
+            np.ones_like(
+                np.array(
+                    [
+                        [[0, 0, 0], [0, 1, 0], [0, 0, 0]],
+                        [[0, 1, 0], [1, 1, 1], [0, 1, 0]],
+                        [[0, 0, 0], [0, 1, 0], [0, 0, 0]],
+                    ]
+                )
             ),
         )
 
@@ -408,100 +410,125 @@ class SeamCarvingGrabcraftGoalGenerator(GrabcraftGoalGenerator):
 
     @staticmethod
     def _calculate_conductivity_diffs(
-        original_struct: Any, cropped_struct: Any, axis: int, index: int
+        original_conductivity: np.ndarray,
+        cropped_blocks: np.ndarray,
+        axis: int,
+        index: int,
     ) -> float:
         assert axis in [0, 1, 2]
 
-        original_conductivity = (
-            SeamCarvingGrabcraftGoalGenerator._calculate_conductivities(original_struct)
-        )
         cropped_conductivity = (
-            SeamCarvingGrabcraftGoalGenerator._calculate_conductivities(cropped_struct)
+            SeamCarvingGrabcraftGoalGenerator._calculate_conductivities(cropped_blocks)
         )
 
-        if axis == 0:
-            original_conductivity = np.delete(original_conductivity, index, axis=0)
-        elif axis == 1:
-            original_conductivity = np.delete(original_conductivity, index, axis=1)
-        elif axis == 2:
-            original_conductivity = np.delete(original_conductivity, index, axis=2)
+        original_conductivity = np.delete(original_conductivity, index, axis=axis)
 
-        diff = np.subtract(original_conductivity, cropped_conductivity)
+        diff = original_conductivity - cropped_conductivity
         return float(np.sum(np.abs(diff)))
 
-    def _min_cost_cut_across_axis(self, structure: Any, axis: int) -> Tuple[Any, float]:
-        cut_size: WorldSize = (1, structure.shape[1], structure.shape[2])
+    def _min_cost_cut_across_axis(
+        self, blocks: np.ndarray, original_conductivity: np.ndarray, axis: int
+    ) -> Tuple[int, float]:
+        cut_size: WorldSize = (1, blocks.shape[1], blocks.shape[2])
         if axis == 0:
-            cut_size = (1, structure.shape[1], structure.shape[2])
+            cut_size = (1, blocks.shape[1], blocks.shape[2])
         if axis == 1:
-            cut_size = (structure.shape[0], 1, structure.shape[2])
+            cut_size = (blocks.shape[0], 1, blocks.shape[2])
         if axis == 2:
-            cut_size = (structure.shape[0], structure.shape[1], 1)
+            cut_size = (blocks.shape[0], blocks.shape[1], 1)
 
         min_cut_idx: int = -1
-        min_cost: float = -1.0
-        for i in range(structure.shape[axis]):
-            cut = MinecraftBlocks(cut_size)
+        min_cost: float = np.inf
+        cut = MinecraftBlocks(cut_size)
+        for i in range(blocks.shape[axis]):
             if axis == 0:
-                cut.blocks = structure[i, :, :]
+                cut.blocks = blocks[i, :, :]
             if axis == 1:
-                cut.blocks = structure[:, i, :]
+                cut.blocks = blocks[:, i, :]
             if axis == 2:
-                cut.blocks = structure[:, :, i]
+                cut.blocks = blocks[:, :, i]
 
-            remaining_blocks = np.delete(structure, i, axis)
+            remaining_blocks = np.delete(blocks, i, axis)
             conductivity_diff = (
                 SeamCarvingGrabcraftGoalGenerator._calculate_conductivity_diffs(
-                    structure, remaining_blocks, axis, i
+                    original_conductivity, remaining_blocks, axis, i
                 )
-                / structure.size
+                / blocks.size
             )
             cut_cost = (
                 self.config["density_cost_weight"] * cut.density()
                 + (1 - self.config["density_cost_weight"]) * conductivity_diff
             )
-            if min_cost < 0 or cut_cost < min_cost:
+            if cut_cost < min_cost:
                 min_cost = cut_cost
                 min_cut_idx = i
 
-        return np.delete(structure, min_cut_idx, axis), min_cost
+        if logger.isEnabledFor(logging.DEBUG):
+            conductivity_diff = (
+                SeamCarvingGrabcraftGoalGenerator._calculate_conductivity_diffs(
+                    original_conductivity, np.delete(blocks, min_cut_idx, axis), axis, min_cut_idx
+                )
+                / blocks.size
+            )
+            if axis == 0:
+                cut.blocks = blocks[min_cut_idx, :, :]
+            if axis == 1:
+                cut.blocks = blocks[:, min_cut_idx, :]
+            if axis == 2:
+                cut.blocks = blocks[:, :, min_cut_idx]
+            logger.debug(
+                f"best cut for {'XYZ'[axis]} axis is {min_cut_idx} "
+                f"(density = {cut.density()}, conductivity = {conductivity_diff})"
+            )
+
+        return min_cut_idx, min_cost
 
     def generate_goal(self, size: WorldSize) -> MinecraftBlocks:
         structure_id = random.choice(list(self.structure_metadata.keys()))
         structure = self._get_structure(structure_id)
         assert structure is not None
 
-        curr_struct = np.copy(structure.blocks)
+        curr_blocks = np.copy(structure.blocks)
+        original_conductivity = self._calculate_conductivities(curr_blocks)
         while (
-            curr_struct.shape[0] > size[0]
-            or curr_struct.shape[1] > size[1]
-            or curr_struct.shape[2] > size[2]
+            curr_blocks.shape[0] > size[0]
+            or curr_blocks.shape[1] > size[1]
+            or curr_blocks.shape[2] > size[2]
         ):
-            crop_costs = []
-            crops = []
-            if curr_struct.shape[0] > size[0]:
-                crop_x, cost_x = self._min_cost_cut_across_axis(curr_struct, 0)
-                crops.append(crop_x)
-                crop_costs.append(cost_x)
-            if curr_struct.shape[1] > size[1]:
-                crop_y, cost_y = self._min_cost_cut_across_axis(curr_struct, 1)
-                crops.append(crop_y)
-                crop_costs.append(cost_y)
-            if curr_struct.shape[2] > size[2]:
-                crop_z, cost_z = self._min_cost_cut_across_axis(curr_struct, 2)
-                crops.append(crop_z)
-                crop_costs.append(cost_z)
+            cut_costs = []
+            cut_locations = []
+            cut_axes = []
+            for axis in [0, 1, 2]:
+                if curr_blocks.shape[axis] > size[axis]:
+                    cut, cost = self._min_cost_cut_across_axis(
+                        curr_blocks, original_conductivity, axis
+                    )
+                    cut_locations.append(cut)
+                    cut_axes.append(axis)
+                    cut_costs.append(cost)
 
-            curr_struct = crops[crop_costs.index(min(crop_costs))]
+            best_index = np.argmin(cut_costs)
+            curr_blocks = np.delete(
+                curr_blocks, cut_locations[best_index], cut_axes[best_index]
+            )
+            original_conductivity = np.delete(
+                original_conductivity, cut_locations[best_index], cut_axes[best_index]
+            )
+            logger.debug(
+                "chose to cut "
+                f"{'XYZ'[cut_axes[best_index]]} = {cut_locations[best_index]} "
+                f"(cost = {cut_costs[best_index]})"
+            )
+            assert curr_blocks.shape == original_conductivity.shape
 
         # Randomly place structure within world.
         carved_struct_size: Tuple[int, int, int] = (
-            curr_struct.shape[0],
-            curr_struct.shape[1],
-            curr_struct.shape[2],
+            curr_blocks.shape[0],
+            curr_blocks.shape[1],
+            curr_blocks.shape[2],
         )
         carved_struct = MinecraftBlocks(carved_struct_size)
-        carved_struct.blocks = curr_struct
+        carved_struct.blocks = curr_blocks
         goal = GoalGenerator.randomly_place_structure(carved_struct, size)
 
         # Add a layer of dirt at the bottom of the structure wherever there's still
