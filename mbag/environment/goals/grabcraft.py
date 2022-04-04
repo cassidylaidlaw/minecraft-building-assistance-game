@@ -466,7 +466,10 @@ class SeamCarvingGrabcraftGoalGenerator(GrabcraftGoalGenerator):
         if logger.isEnabledFor(logging.DEBUG):
             conductivity_diff = (
                 SeamCarvingGrabcraftGoalGenerator._calculate_conductivity_diffs(
-                    original_conductivity, np.delete(blocks, min_cut_idx, axis), axis, min_cut_idx
+                    original_conductivity,
+                    np.delete(blocks, min_cut_idx, axis),
+                    axis,
+                    min_cut_idx,
                 )
                 / blocks.size
             )
