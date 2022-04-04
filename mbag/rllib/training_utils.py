@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, Type, Union, cast
 from ray.rllib.agents.trainer import Trainer
 from ray.rllib.evaluation.worker_set import WorkerSet
 from ray.rllib.policy.policy import Policy
-from ray.rllib.utils.typing import ModelWeights, PolicyID, TrainerConfigDict
+from ray.rllib.utils.typing import PolicyID, TrainerConfigDict
 from ray.tune.logger import UnifiedLogger
 from ray.tune.registry import get_trainable_cls
 
@@ -59,7 +59,9 @@ def load_trainer(
 ) -> Trainer:
     config = load_trainer_config(checkpoint_path)
     config_updates.setdefault("num_workers", 0)
-    config.update(config_updates)
+    config = Trainer.merge_trainer_configs(
+        config, config_updates, _allow_unknown_configs=True
+    )
 
     # Create the Trainer from config.
     if isinstance(run, str):
@@ -85,16 +87,13 @@ def load_policies_from_checkpoint(
 
     with open(checkpoint_fname, "rb") as checkpoint_file:
         checkpoint_data = cloudpickle.load(checkpoint_file)
-    policy_weights: Dict[str, ModelWeights] = cloudpickle.loads(
-        checkpoint_data["worker"]
-    )["state"]
-
-    for policy_id, weights in policy_weights.items():
-        if "_optimizer_variables" in weights:
-            del weights["_optimizer_variables"]
+    policy_states: Dict[str, Any] = cloudpickle.loads(checkpoint_data["worker"])[
+        "state"
+    ]
 
     policy_weights = {
-        policy_map(policy_id): weights for policy_id, weights in policy_weights.items()
+        policy_map(policy_id): policy_state["weights"]
+        for policy_id, policy_state in policy_states.items()
     }
 
     def copy_policy_weights(policy: Policy, policy_id: PolicyID):

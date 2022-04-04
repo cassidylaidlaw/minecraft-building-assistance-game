@@ -4,12 +4,12 @@ for predicting the next action given past actions.
 """
 
 import logging
-import gym
 import numpy as np
 from ray.rllib.execution.concurrency_ops import Concurrently, Dequeue, Enqueue
 from ray.rllib.execution.learner_thread import LearnerThread
 from ray.rllib.models.torch.attention_net import AttentionWrapper
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
+from ray.rllib.agents.trainer import Trainer
 from ray.rllib.utils.sgd import minibatches
 from ray.tune.registry import register_trainable
 from ray.rllib.execution.common import (
@@ -39,14 +39,17 @@ from ray.rllib.utils.typing import (
     TensorType,
 )
 from ray.util.iter import LocalIterator
-from ray.rllib.models.modelv2 import ModelV2
 from ray.rllib.models.torch.torch_action_dist import TorchDistributionWrapper
-from ray.rllib.policy.policy_template import build_policy_class
-from ray.rllib.policy.torch_policy import LearningRateSchedule, TorchPolicy
-from ray.rllib.utils.torch_ops import (
+from ray.rllib.policy.torch_policy import (
+    LearningRateSchedule,
+    EntropyCoeffSchedule,
+    TorchPolicy,
+)
+from ray.rllib.utils.torch_utils import (
     apply_grad_clipping,
     sequence_mask,
 )
+from ray.rllib.utils.numpy import convert_to_numpy
 
 from .training_utils import load_policies_from_checkpoint
 
@@ -82,6 +85,10 @@ DEFAULT_CONFIG = with_common_config(
         "lr_schedule": None,
         # If specified, clip the global norm of gradients by this amount.
         "grad_clip": None,
+        # Coefficient of the entropy regularizer.
+        "entropy_coeff": 0.0,
+        # Decay schedule for the entropy regularizer.
+        "entropy_coeff_schedule": None,
         # Whether to rollout "complete_episodes" or "truncate_episodes".
         "batch_mode": "truncate_episodes",
         # Which observation filter to apply to the observation.
@@ -110,119 +117,146 @@ def validate_config(config: TrainerConfigDict) -> None:
         raise ValueError("only PyTorch is supported")
 
 
-class DistillationPredictionPolicyType(TorchPolicy):
-    model: TorchModelV2
-
+class DistillationPredictionPolicy(
+    TorchPolicy, LearningRateSchedule, EntropyCoeffSchedule
+):
     # Cross-entropy during the first epoch of SGD. This is a more reliable metric
     # for prediction performance because the model has not yet been able to train on
     # the data.
     _initial_cross_entropy: List[float]
 
-    _cross_entropy: torch.Tensor
-    _total_loss: torch.Tensor
-    _last_batch: SampleBatch
-
-
-def distillation_loss(
-    policy: DistillationPredictionPolicyType,
-    model: ModelV2,
-    dist_class: Type[TorchDistributionWrapper],
-    train_batch: SampleBatch,
-) -> Union[TensorType, List[TensorType]]:
-    # Replace initial state from teacher model with initial state from student model.
-    for state_index, initial_state in enumerate(model.get_initial_state()):
-        if isinstance(initial_state, np.ndarray):
-            initial_state_tensor = torch.from_numpy(initial_state)
-        else:
-            initial_state_tensor = initial_state
-        train_batch[f"state_in_{state_index}"] = initial_state_tensor[None].repeat(
-            (train_batch["state_in_0"].shape[0], 1)
+    def __init__(self, observation_space, action_space, config):
+        config = Trainer.merge_trainer_configs(
+            {**DEFAULT_CONFIG, "worker_index": None}, config
         )
 
-    # If the model is a transformer, we need to add additional state to the batch.
-    if isinstance(model, AttentionWrapper):
-        for data_col, view_req in policy.view_requirements.items():
-            if data_col.startswith("state_in_"):
-                train_batch[data_col] = np.zeros(
-                    (
-                        len(train_batch["seq_lens"]),
-                        view_req.shift_to - view_req.shift_from + 1,
+        TorchPolicy.__init__(
+            self,
+            observation_space,
+            action_space,
+            config,
+            max_seq_len=config["model"]["max_seq_len"],
+        )
+
+        EntropyCoeffSchedule.__init__(
+            self, config["entropy_coeff"], config["entropy_coeff_schedule"]
+        )
+        LearningRateSchedule.__init__(self, config["lr"], config["lr_schedule"])
+
+        self._initial_cross_entropy = []
+
+        self._initialize_loss_from_dummy_batch()
+
+    def loss(
+        self,
+        model: TorchModelV2,
+        dist_class: Type[TorchDistributionWrapper],
+        train_batch: SampleBatch,
+    ) -> Union[TensorType, List[TensorType]]:
+        # Replace initial state from teacher model with initial state from student model.
+        for state_index, initial_state in enumerate(model.get_initial_state()):
+            if isinstance(initial_state, np.ndarray):
+                initial_state_tensor = torch.from_numpy(initial_state)
+            else:
+                initial_state_tensor = initial_state
+            train_batch[f"state_in_{state_index}"] = initial_state_tensor[None].repeat(
+                (len(train_batch[SampleBatch.SEQ_LENS]), 1)
+            )
+
+        # If the model is a transformer, we need to add additional state to the batch.
+        if isinstance(model, AttentionWrapper):
+            for data_col, view_req in self.view_requirements.items():
+                if data_col.startswith("state_in_"):
+                    train_batch[data_col] = np.zeros(
+                        (
+                            len(train_batch["seq_lens"]),
+                            view_req.shift_to - view_req.shift_from + 1,
+                        )
+                        + view_req.space.shape
                     )
-                    + view_req.space.shape
-                )
 
-    # TODO: is this still an issue?
-    # train_batch.dont_check_lens = True
-    logits, state = model.from_batch(train_batch, is_training=True)
-    action_dist = dist_class(logits, model)
+        # TODO: is this still an issue?
+        # train_batch.dont_check_lens = True
+        logits, state = model(train_batch)
+        action_dist = dist_class(logits, model)
 
-    # RNN case: Mask away 0-padded chunks at end of time axis.
-    if state:
-        batch_size = len(train_batch["seq_lens"])
-        max_seq_len = logits.shape[0] // batch_size
-        mask = sequence_mask(
-            train_batch["seq_lens"], max_seq_len, time_major=model.is_time_major()
+        # RNN case: Mask away 0-padded chunks at end of time axis.
+        if state:
+            batch_size = len(train_batch["seq_lens"])
+            max_seq_len = logits.shape[0] // batch_size
+            mask = sequence_mask(
+                train_batch["seq_lens"], max_seq_len, time_major=model.is_time_major()
+            )
+            mask = torch.reshape(mask, [-1])
+            num_valid = torch.sum(mask)
+
+            def reduce_mean_valid(t):
+                return torch.sum(t[mask]) / num_valid
+
+        # non-RNN case: No masking.
+        else:
+            mask = None
+            reduce_mean_valid = torch.mean
+
+        # Compute cross entropy loss.
+        cross_entropy = -action_dist.logp(train_batch[SampleBatch.ACTIONS])
+        mean_cross_entropy = reduce_mean_valid(cross_entropy)
+
+        curr_entropy = action_dist.entropy()
+        mean_entropy = reduce_mean_valid(curr_entropy)
+
+        total_loss = reduce_mean_valid(
+            cross_entropy - self.entropy_coeff * curr_entropy
         )
-        mask = torch.reshape(mask, [-1])
-        num_valid = torch.sum(mask)
 
-        def reduce_mean_valid(t):
-            return torch.sum(t[mask]) / num_valid
+        # Store values for stats function in model (tower), such that for
+        # multi-GPU, we do not override them during the parallel loss phase.
+        model.tower_stats["total_loss"] = total_loss
+        model.tower_stats["mean_cross_entropy"] = mean_cross_entropy
+        model.tower_stats["mean_entropy"] = mean_entropy
 
-    # non-RNN case: No masking.
-    else:
-        mask = None
-        reduce_mean_valid = torch.mean
+        batches_per_epoch: int = (
+            self.config["train_batch_size"] // self.config["sgd_minibatch_size"]
+        )
+        if len(self._initial_cross_entropy) < batches_per_epoch:
+            self._initial_cross_entropy.append(mean_cross_entropy.item())
 
-    cross_entropy = -action_dist.logp(train_batch[SampleBatch.ACTIONS])
-    total_loss = reduce_mean_valid(cross_entropy)
+        return total_loss
 
-    # Store stats in policy for stats_fn.
-    policy._cross_entropy = reduce_mean_valid(cross_entropy)
-    policy._total_loss = total_loss
-    policy._last_batch = train_batch
+    def extra_grad_process(self, local_optimizer, loss):
+        return apply_grad_clipping(self, local_optimizer, loss)
 
-    if not hasattr(policy, "_initial_cross_entropy"):
-        policy._initial_cross_entropy = []
-    batches_per_epoch = (
-        policy.config["train_batch_size"] // policy.config["sgd_minibatch_size"]
-    )
-    if len(policy._initial_cross_entropy) < batches_per_epoch:
-        policy._initial_cross_entropy.append(policy._cross_entropy.item())
+    def extra_grad_info(self, train_batch: SampleBatch) -> Dict[str, TensorType]:
+        return cast(
+            Dict[str, TensorType],
+            convert_to_numpy(
+                {
+                    "cur_lr": self.cur_lr,
+                    "total_loss": torch.mean(
+                        torch.stack(self.get_tower_stats("total_loss"))
+                    ),
+                    "cross_entropy": torch.mean(
+                        torch.stack(self.get_tower_stats("mean_cross_entropy"))
+                    ),
+                    "entropy": torch.mean(
+                        torch.stack(self.get_tower_stats("mean_entropy"))
+                    ),
+                    "entropy_coeff": self.entropy_coeff,
+                }
+            ),
+        )
 
-    return total_loss
-
-
-def distillation_stats(
-    policy: DistillationPredictionPolicyType, train_batch: SampleBatch
-) -> Dict[str, TensorType]:
-    return {
-        "cross_entropy": policy._cross_entropy,
-        "total_loss": policy._total_loss,
-    }
-
-
-def setup_mixins(
-    policy: Policy,
-    obs_space: gym.spaces.Space,
-    action_space: gym.spaces.Space,
-    config: TrainerConfigDict,
-) -> None:
-    LearningRateSchedule.__init__(policy, config["lr"], config["lr_schedule"])
-
-
-# Build a child class of `TorchPolicy`, given the custom functions defined
-# above.
-DistillationPredictionPolicy = build_policy_class(
-    name="DistillationPredictionPolicy",
-    framework="torch",
-    get_default_config=lambda: DEFAULT_CONFIG,
-    loss_fn=distillation_loss,
-    stats_fn=distillation_stats,
-    extra_grad_process_fn=apply_grad_clipping,
-    before_loss_init=setup_mixins,
-    mixins=[LearningRateSchedule],
-)
+    def on_global_var_update(self, global_vars):
+        super().on_global_var_update(global_vars)
+        if self._lr_schedule:
+            self.cur_lr = self._lr_schedule.value(global_vars["timestep"])
+            for opt in self._optimizers:
+                for p in opt.param_groups:
+                    p["lr"] = self.cur_lr
+        if self._entropy_coeff_schedule is not None:
+            self.entropy_coeff = self._entropy_coeff_schedule.value(
+                global_vars["timestep"]
+            )
 
 
 class MapExperiences:
@@ -260,8 +294,7 @@ class MapExperiences:
 
 class PredictionMetrics:
     """
-    Extra logging for the distillation-prediction trainer. It currently adds a plot
-    of prediction performance over time.
+    Extra logging for the distillation-prediction trainer.
     """
 
     def __init__(self, config: TrainerConfigDict, workers: WorkerSet):
@@ -271,7 +304,7 @@ class PredictionMetrics:
     def __call__(self, result):
         policy_ids = self.workers.trainable_policies()
         for policy_id in policy_ids:
-            policy: DistillationPredictionPolicyType = (
+            policy: DistillationPredictionPolicy = (
                 self.workers.local_worker().get_policy(policy_id)
             )
 

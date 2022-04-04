@@ -9,6 +9,7 @@ BlockLocation = Tuple[int, int, int]
 
 WorldLocation = Tuple[float, float, float]
 
+FacingDirection = Tuple[float, float]  # Degrees horizontally, then vertically
 
 MbagWorldObsArray = np.ndarray
 """
@@ -19,14 +20,20 @@ different information about the world. The channels are
  1: current block states
  2: goal blocks
  3: goal block states
+ 4: player locations
 """
 
-num_world_obs_channels = 4
+CURRENT_BLOCKS = 0
+CURRENT_BLOCK_STATES = 1
+GOAL_BLOCKS = 2
+GOAL_BLOCK_STATES = 3
+PLAYER_LOCATIONS = 4
+num_world_obs_channels = 5
 
 MbagObs = Tuple[MbagWorldObsArray]
 
 
-MbagActionType = Literal[0, 1, 2]
+MbagActionType = Literal[0, 1, 2, 3, 4, 5, 6, 7, 8]
 MbagActionTuple = Tuple[MbagActionType, int, int]
 """
 An action tuple (action_type, block_location, block_id).
@@ -42,11 +49,24 @@ class MbagAction(object):
     PLACE_BLOCK: MbagActionType = 1
     BREAK_BLOCK: MbagActionType = 2
 
-    NUM_ACTION_TYPES = 3
+    MOVE_POS_X: MbagActionType = 3
+    MOVE_NEG_X: MbagActionType = 4
+    MOVE_POS_Y: MbagActionType = 5
+    MOVE_NEG_Y: MbagActionType = 6
+    MOVE_POS_Z: MbagActionType = 7
+    MOVE_NEG_Z: MbagActionType = 8
+
+    NUM_ACTION_TYPES = 9
     ACTION_TYPE_NAMES = {
         NOOP: "NOOP",
         PLACE_BLOCK: "PLACE_BLOCK",
         BREAK_BLOCK: "BREAK_BLOCK",
+        MOVE_POS_X: "MOVE_POS_X",
+        MOVE_NEG_X: "MOVE_NEG_X",
+        MOVE_POS_Y: "MOVE_POS_Y",
+        MOVE_NEG_Y: "MOVE_NEG_Y",
+        MOVE_POS_Z: "MOVE_POS_Z",
+        MOVE_NEG_Z: "MOVE_NEG_Z",
     }
 
     action_type: MbagActionType
@@ -83,4 +103,15 @@ class MbagInfoDict(TypedDict):
     Number representing how similar the current blocks in the world are to the goal
     structure. Higher is more similar. This can be used as a truer "reward" than the
     potentially shaped reward given to the agent by the environment.
+    """
+
+    own_reward: float
+    """
+    The reward from this step which is due to the current player's direct actions.
+    """
+
+    own_reward_prop: float
+    """
+    The current proportion of this player's reward which is coming from their own
+    direct actions, as opposed to other agents'.
     """

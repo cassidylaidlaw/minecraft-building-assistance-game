@@ -2,10 +2,14 @@
 Code to interface with Project Malmo.
 """
 
+import shutil
+import tarfile
+import tempfile
 from typing import List, Optional, TypedDict, cast
 import MalmoPython
 import logging
 import time
+import os
 import sys
 import uuid
 import json
@@ -21,6 +25,9 @@ logger = logging.getLogger(__name__)
 class MalmoObservationDict(TypedDict, total=False):
     world: List[str]
     goal: List[str]
+    XPos: float
+    YPos: float
+    ZPos: float
 
 
 class MalmoClient(object):
@@ -28,10 +35,12 @@ class MalmoClient(object):
 
     agent_hosts: List[MalmoPython.AgentHost]
     experiment_id: str
+    record_fname: Optional[str]
 
     def __init__(self):
         self.client_pool = MalmoPython.ClientPool()
         self.client_pool_size = 0
+        self.record_fname = None
 
     def _get_agent_section_xml(self, player_index: int, env_config: MbagConfigDict):
         width, height, depth = env_config["world_size"]
@@ -46,9 +55,16 @@ class MalmoClient(object):
             )
         inventory_items_xml = "\n".join(inventory_item_tags)
 
+        if env_config["malmo"]["player_names"] is not None:
+            player_name = env_config["malmo"]["player_names"][player_index]
+        else:
+            player_name = f"player_{player_index}"
+        # Player names cannot be longer than 16 character in Minecraft.
+        player_name = player_name[:16]
+
         return f"""
         <AgentSection mode="Creative">
-            <Name>player_{player_index}</Name>
+            <Name>{player_name}</Name>
             <AgentStart>
                 <Placement x="{0.5 + player_index}" y="2" z="0.5" yaw="270"/>
                 <Inventory>
@@ -67,6 +83,7 @@ class MalmoClient(object):
                     </Grid>
                 </ObservationFromGrid>
                 <ObservationFromFullInventory />
+                <ObservationFromFullStats />
                 <AbsoluteMovementCommands />
                 <DiscreteMovementCommands>
                     <ModifierList type="deny-list">
@@ -84,19 +101,50 @@ class MalmoClient(object):
         </AgentSection>
         """
 
-    def _get_observer_agent_section_xml(self, env_config: MbagConfigDict) -> str:
+    def _get_spectator_position(self, env_config: MbagConfigDict) -> BlockLocation:
         width, height, depth = env_config["world_size"]
+        x = width
+        y = height // 2 + 1
+        z = -width
+        return x, y, z
+
+    def _get_spectator_agent_section_xml(self, env_config: MbagConfigDict) -> str:
+        width, height, depth = env_config["world_size"]
+        x, y, z = self._get_spectator_position(env_config)
+        pitch = np.rad2deg(np.arctan((y - height / 2) / (depth / 2 - z)))
         return f"""
         <AgentSection mode="Creative">
-            <Name>observer</Name>
+            <Name>spectator</Name>
             <AgentStart>
-                <Placement x="{width}" y="{height // 2}" z="-8" yaw="0"/>
+                <Placement x="{x + 0.5}" y="{y}" z="{z + 0.5}" yaw="0" pitch="{pitch}" />
             </AgentStart>
             <AgentHandlers>
-                <ObservationFromFullStats />
+                <VideoProducer>
+                    <Width>640</Width>
+                    <Height>480</Height>
+                </VideoProducer>
             </AgentHandlers>
         </AgentSection>
         """
+
+    def _get_spectator_platform_drawing_decorator_xml(
+        self, env_config: MbagConfigDict
+    ) -> str:
+        if env_config["malmo"]["use_spectator"]:
+            x, y, z = self._get_spectator_position(env_config)
+            return f"""
+            <DrawCuboid
+                type="bedrock"
+                x1="{x}"
+                y1="1"
+                z1="{z}"
+                x2="{x}"
+                y2="{y - 1}"
+                z2="{z}"
+            />
+            """
+        else:
+            return ""
 
     def _blocks_to_drawing_decorator_xml(
         self, blocks: MinecraftBlocks, offset: BlockLocation = (0, 0, 0)
@@ -141,7 +189,7 @@ class MalmoClient(object):
             for player_index in range(env_config["num_players"])
         ]
         if env_config["malmo"]["use_spectator"]:
-            agent_section_xmls.append(self._get_observer_agent_section_xml(env_config))
+            agent_section_xmls.append(self._get_spectator_agent_section_xml(env_config))
         agent_sections_xml = "\n".join(agent_section_xmls)
 
         return f"""
@@ -170,6 +218,7 @@ class MalmoClient(object):
                     <DrawingDecorator>
                         {self._blocks_to_drawing_decorator_xml(current_blocks)}
                         {self._blocks_to_drawing_decorator_xml(goal_blocks, (width + 1, 0, 0))}
+                        {self._get_spectator_platform_drawing_decorator_xml(env_config)}
                     </DrawingDecorator>
                     <BuildBattleDecorator>
                         <PlayerStructureBounds>
@@ -202,7 +251,7 @@ class MalmoClient(object):
         mission: MalmoPython.MissionSpec,
         mission_record: MalmoPython.MissionRecordSpec,
         player_index: int,
-        max_attempts: int = 1 if "pytest" in sys.modules else 0,
+        max_attempts: int = 1 if "pytest" in sys.modules else 5,
     ):
         used_attempts = 0
         logger.info(f"starting Malmo mission for player {player_index}")
@@ -282,6 +331,22 @@ class MalmoClient(object):
             num_agents += 1
         return num_agents
 
+    def _get_spectator_agent_index(self, env_config: MbagConfigDict) -> Optional[int]:
+        if env_config["malmo"]["use_spectator"]:
+            return env_config["num_players"]
+        else:
+            return None
+
+    def _generate_record_fname(self, env_config: MbagConfigDict):
+        video_dir = env_config["malmo"]["video_dir"]
+        assert video_dir is not None
+        video_index = 0
+        while True:
+            self.record_fname = os.path.join(video_dir, f"{video_index:06d}.tar.gz")
+            if not os.path.exists(self.record_fname):
+                return
+            video_index += 1
+
     def start_mission(
         self,
         env_config: MbagConfigDict,
@@ -290,24 +355,38 @@ class MalmoClient(object):
     ):
         self._expand_client_pool(self._get_num_agents(env_config))
         self.experiment_id = str(uuid.uuid4())
+        self.record_fname = None
 
         self.agent_hosts = []
-        for player_index in range(env_config["num_players"]):
+        for player_index in range(self._get_num_agents(env_config)):
             agent_host = MalmoPython.AgentHost()
             self.agent_hosts.append(agent_host)
             mission_spec_xml = self._get_mission_spec_xml(
                 env_config, current_blocks, goal_blocks, force_reset=player_index == 0
             )
+            record_spec = MalmoPython.MissionRecordSpec()
+            if player_index == self._get_spectator_agent_index(env_config):
+                if env_config["malmo"]["video_dir"]:
+                    self._generate_record_fname(env_config)
+                    record_spec = MalmoPython.MissionRecordSpec(self.record_fname)
+                    record_spec.recordMP4(
+                        MalmoPython.FrameType.VIDEO, 20, 400000, False
+                    )
             self._safe_start_mission(
                 agent_host,
                 MalmoPython.MissionSpec(mission_spec_xml, True),
-                MalmoPython.MissionRecordSpec(),
+                record_spec,
                 player_index,
             )
+            if player_index == 0:
+                # Seems important to give some time before trying to start the other
+                # agent hosts.
+                time.sleep(5)
 
         self._safe_wait_for_start(self.agent_hosts)
 
     def send_command(self, player_index: int, command: str):
+        logger.debug(f"player {player_index} command: {command}")
         self.agent_hosts[player_index].sendCommand(command)
 
     def get_observation(self, player_index: int) -> Optional[MalmoObservationDict]:
@@ -324,3 +403,31 @@ class MalmoClient(object):
             )
         else:
             return None
+
+    def end_mission(self):
+        for player_index in range(len(self.agent_hosts)):
+            self.send_command(player_index, "quit")
+
+        # Important to get rid of agent hosts, which triggers video writing for some
+        # reason.
+        self.agent_hosts = []
+
+        self._save_specatator_video()
+
+    def _save_specatator_video(self):
+        if self.record_fname is None:
+            return
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            record_tar = tarfile.open(self.record_fname, "r:gz")
+            video_member_name = None
+            for member_name in record_tar.getnames():
+                if member_name.endswith("/video.mp4"):
+                    video_member_name = member_name
+                    break
+            assert video_member_name is not None
+            record_tar.extract(video_member_name, temp_dir)
+            shutil.move(
+                os.path.join(temp_dir, video_member_name),
+                self.record_fname[: -len(".tar.gz")] + ".mp4",
+            )

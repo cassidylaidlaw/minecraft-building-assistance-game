@@ -1,12 +1,11 @@
 from typing import Dict, List, Optional, Sequence, Set, Tuple, TypeVar, cast
 
 import cc3d
-from typing_extensions import Literal
 from numpy.typing import NDArray
 import numpy as np
 import random
 
-from .types import BlockLocation, MbagAction, WorldLocation, WorldSize
+from .types import BlockLocation, MbagAction, MbagActionType, WorldLocation, WorldSize
 
 
 def cartesian_product(*arrays):
@@ -42,28 +41,10 @@ class MinecraftBlocks(object):
         "air",
         "bedrock",
         "dirt",
-        "brick_block",
-        "clay",
         "cobblestone",
         "glass",
-        "gravel",
-        "hardened_clay",
-        "hay_block",
-        "ice",
         "log",
-        "nether_brick",
-        "netherrack",
-        "obsidian",
         "planks",
-        "prismarine",
-        "quartz_block",
-        "redstone_block",
-        "redstone_lamp",
-        "sand",
-        "sandstone",
-        "sea_lantern",
-        "snow",
-        "stained_hardened_clay",
         "stone",
         "stonebrick",
         "wool",
@@ -88,28 +69,10 @@ class MinecraftBlocks(object):
     SOLID_BLOCK_NAMES: Set[str] = {
         "bedrock",
         "dirt",
-        "brick_block",
-        "clay",
         "cobblestone",
         "glass",
-        "gravel",
-        "hardened_clay",
-        "hay_block",
-        "ice",
         "log",
-        "nether_brick",
-        "netherrack",
-        "obsidian",
         "planks",
-        "prismarine",
-        "quartz_block",
-        "redstone_block",
-        "redstone_lamp",
-        "sand",
-        "sandstone",
-        "sea_lantern",
-        "snow",
-        "stained_hardened_clay",
         "stone",
         "stonebrick",
         "wool",
@@ -161,10 +124,13 @@ class MinecraftBlocks(object):
 
     def try_break_place(
         self,
-        action_type: Literal[1, 2],
+        action_type: MbagActionType,
         block_location: BlockLocation,
         block_id: int = 0,
+        *,
         player_location: Optional[WorldLocation] = None,
+        other_player_locations: List[WorldLocation] = [],
+        update_blocks: bool = True,
     ) -> Optional[Tuple[WorldLocation, WorldLocation]]:
         """
         Try to place or break a block (depending on action_type) at the given
@@ -173,6 +139,9 @@ class MinecraftBlocks(object):
         If the block can be placed or broken, then returns a tuple with the successful
         player location and click location, and updates the blocks accordingly.
         """
+
+        if action_type not in [MbagAction.PLACE_BLOCK, MbagAction.BREAK_BLOCK]:
+            raise ValueError(f"Invalid action_type: {action_type}")
 
         # Check if block can be placed or broken at all.
         if action_type == MbagAction.PLACE_BLOCK:
@@ -285,7 +254,7 @@ class MinecraftBlocks(object):
             )
         ]
 
-        player_viewpoints = player_locations.copy()
+        player_viewpoints = player_locations.copy().astype("float64")
         player_viewpoints[:, 1] += 1.6  # Player viewpoint is 1.6 m above feet.
 
         viewpoint_click_candidates: np.ndarray = np.empty(
@@ -317,6 +286,20 @@ class MinecraftBlocks(object):
 
         intersection = np.zeros(viewpoints.shape[0], bool)
         current_block_locations = viewpoints.astype(int)
+        # Obstructions include any non-air blocks plus any blocks with a player in
+        # them.
+        obstructions = blocks != MinecraftBlocks.AIR
+        for other_player_x, other_player_y, other_player_z in other_player_locations:
+            assert (
+                other_player_x % 1 == 0.5
+                and other_player_y % 1 == 0
+                and other_player_z % 1 == 0.5
+            )
+            obstructions[
+                int(other_player_x),
+                int(other_player_y) : int(other_player_y) + 2,
+                int(other_player_z),
+            ] = True
         while np.any(t_max < 1):
             min_mask = np.zeros_like(t_max, dtype=int)
             min_mask[range(min_mask.shape[0]), np.argmin(t_max, axis=1)] = 1
@@ -324,15 +307,12 @@ class MinecraftBlocks(object):
             t_max += t_delta * min_mask
             current_block_locations += step * min_mask
 
-            intersection |= (
-                blocks.flat[
-                    np.ravel_multi_index(
-                        cast(Sequence[NDArray[np.int_]], current_block_locations.T),
-                        blocks.shape,
-                    )
-                ]
-                != MinecraftBlocks.AIR
-            )
+            intersection |= obstructions.flat[
+                np.ravel_multi_index(
+                    cast(Sequence[NDArray[np.int_]], current_block_locations.T),
+                    blocks.shape,
+                )
+            ]
 
         viewpoint_click_candidates = viewpoint_click_candidates[~intersection]
         if len(viewpoint_click_candidates) == 0:
@@ -340,13 +320,14 @@ class MinecraftBlocks(object):
             return None
 
         # Actually break/place the block.
-        if action_type == MbagAction.BREAK_BLOCK:
-            self.blocks[block_location] = MinecraftBlocks.AIR
-            self.block_states[block_location] = 0
-        else:
-            self.blocks[block_location] = block_id
-            self.block_states[block_location] = 0
-        # TODO: add block to inventory?
+        if update_blocks:
+            if action_type == MbagAction.BREAK_BLOCK:
+                self.blocks[block_location] = MinecraftBlocks.AIR
+                self.block_states[block_location] = 0
+            else:
+                self.blocks[block_location] = block_id
+                self.block_states[block_location] = 0
+            # TODO: add block to inventory?
 
         viewpoint, click_location = random.choice(
             cast(Sequence[Tuple[np.ndarray, np.ndarray]], viewpoint_click_candidates)

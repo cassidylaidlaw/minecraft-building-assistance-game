@@ -1,14 +1,22 @@
 import pytest
 import numpy as np
+import logging
 from numpy.testing import assert_array_equal
 
 from mbag.environment.goals.grabcraft import GrabcraftGoalGenerator
+from mbag.environment.mbag_env import MbagConfigDict
 from mbag.evaluation.evaluator import MbagEvaluator
-from mbag.agents.heuristic_agents import LayerBuilderAgent, PriorityQueueAgent
+from mbag.agents.heuristic_agents import (
+    LayerBuilderAgent,
+    PriorityQueueAgent,
+    ALL_HEURISTIC_AGENTS,
+)
 from mbag.environment.goals.simple import (
     BasicGoalGenerator,
     SimpleOverhangGoalGenerator,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def test_layer_builder_agent():
@@ -151,3 +159,52 @@ def test_malmo_pq():
     )
     episode_info = evaluator.rollout()
     assert episode_info.cumulative_reward == 13
+
+
+def test_rllib_heuristic_agents():
+    from ray.rllib.agents.pg.pg import PGTrainer
+    from ray.rllib.rollout import rollout
+    from mbag.rllib.policies import MbagAgentPolicy
+
+    env_config: MbagConfigDict = {
+        "world_size": (8, 8, 8),
+        "num_players": 1,
+        "horizon": 100,
+        "goal_generator": (BasicGoalGenerator, {}),
+        "goal_visibility": [True],
+        "malmo": {
+            "use_malmo": False,
+            "use_spectator": False,
+            "video_dir": None,
+        },
+    }
+
+    for heuristic_agent_id, heuristic_agent_cls in ALL_HEURISTIC_AGENTS.items():
+        logger.info(f"Testing {heuristic_agent_id} agent...")
+        heuristic_agent = heuristic_agent_cls({}, env_config)
+        trainer = PGTrainer(
+            {
+                "env": "MBAG-v1",
+                "env_config": env_config,
+                "multiagent": {
+                    "policies": {
+                        "pq": (
+                            MbagAgentPolicy,
+                            None,
+                            None,
+                            {"mbag_agent": heuristic_agent},
+                        )
+                    },
+                    "policy_mapping_fn": lambda agent_id: "pq",
+                    "policies_to_train": [],
+                },
+                "framework": "torch",
+            }
+        )
+
+        rollout(
+            trainer,
+            None,
+            num_steps=0,
+            num_episodes=2,
+        )

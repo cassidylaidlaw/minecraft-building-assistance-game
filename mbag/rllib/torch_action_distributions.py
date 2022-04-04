@@ -19,6 +19,13 @@ from mbag.environment.blocks import MinecraftBlocks
 from .torch_models import MbagModel
 
 
+def kl_categorical_categorical_no_inf(p: Categorical, q: Categorical) -> torch.Tensor:
+    t: torch.Tensor = p.probs * (p.logits - q.logits)
+    # t[(q.probs == 0).expand_as(t)] = inf
+    t[(p.probs == 0).expand_as(t)] = 0
+    return t.sum(-1)
+
+
 class MbagAutoregressiveActionDistribution(TorchDistributionWrapper):
     """
     An auto-regressive action distribution for the MBAG environment. First, it samples
@@ -164,14 +171,17 @@ class MbagAutoregressiveActionDistribution(TorchDistributionWrapper):
         action_type_location_kl = action_type_location_dist.kl(
             other._action_type_location_distribution()
         )
-        block_id_kl = block_id_dist.kl(
-            other._block_id_distribution(action_type, block_location, skip_cache=True)
+        block_id_kl = kl_categorical_categorical_no_inf(
+            block_id_dist.dist,
+            other._block_id_distribution(
+                action_type, block_location, skip_cache=True
+            ).dist,
         )
-        # Ignore infinite KL for block_id since the supervised loss tends to push
-        # some probabilities down to zero.
-        block_id_kl[torch.isinf(block_id_kl)] = 0
 
-        return action_type_location_kl + block_id_kl
+        kl = action_type_location_kl + block_id_kl
+        if ~torch.all(torch.isfinite(kl)):
+            breakpoint()
+        return kl
 
     def _action_type_location_distribution(
         self, mask_logit=-1e8
@@ -403,12 +413,9 @@ class ActionTypeLocationDistribution(TorchCategorical):
         return cast(torch.Tensor, Categorical(probs=self._combined_probs).entropy())
 
     def kl(self, other: "ActionTypeLocationDistribution") -> torch.Tensor:
-        return cast(
-            torch.Tensor,
-            torch.distributions.kl.kl_divergence(
-                Categorical(probs=self._combined_probs),
-                Categorical(probs=other._combined_probs),
-            ),
+        return kl_categorical_categorical_no_inf(
+            Categorical(probs=self._combined_probs),
+            Categorical(probs=other._combined_probs),
         )
 
 

@@ -1,31 +1,18 @@
-from ray.rllib.models.torch.torch_action_dist import TorchDistributionWrapper
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
 from ray.rllib.policy.torch_policy import TorchPolicy
-from mbag.environment.blocks import MinecraftBlocks
-from typing import Callable, Dict, List, Tuple, Type
+from typing import Dict, List, Tuple, Type, cast
 import gym
+import torch
 import numpy as np
 from ray.rllib.policy import Policy
 from ray.rllib.policy.sample_batch import SampleBatch
 from ray.rllib.utils.typing import TensorType, TrainerConfigDict
-from ray.rllib.models.modelv2 import ModelV2, restore_original_dimensions
+from ray.rllib.models.modelv2 import restore_original_dimensions
+from ray.rllib.utils.numpy import convert_to_numpy
 
-# TODO: update to newer RLlib interface
-from ray.rllib.agents.ppo.ppo_torch_policy import (  # type: ignore
-    PPOTorchPolicy,
-    ppo_surrogate_loss,
-    kl_and_loss_stats as ppo_stats,
-)
-from ray.rllib.agents.ppo.appo_torch_policy import (
-    AsyncPPOTorchPolicy,
-    appo_surrogate_loss,
-    stats as appo_stats,
-)
-from ray.rllib.agents.impala.vtrace_torch_policy import (
-    VTraceTorchPolicy,
-    build_vtrace_loss,
-    stats as vtrace_stats,
-)
+from ray.rllib.agents.ppo.ppo_torch_policy import PPOTorchPolicy
+from ray.rllib.agents.ppo.appo_torch_policy import AsyncPPOTorchPolicy
+from ray.rllib.agents.impala.vtrace_torch_policy import VTraceTorchPolicy
 
 from mbag.environment.types import MbagAction, MbagActionTuple, MbagObs
 from mbag.agents.mbag_agent import MbagAgent
@@ -87,7 +74,7 @@ class MbagAgentPolicy(Policy):
             for action_part in range(3)
         )
         state_arrays = [
-            np.array([new_state[state_part] for new_state in new_states], dtype=float)
+            np.array([new_state[state_part] for new_state in new_states])
             for state_part in range(len(state_batches))
         ]
         return action_arrays, state_arrays, {}
@@ -104,11 +91,6 @@ class MbagAgentPolicy(Policy):
 
 def add_supervised_loss_to_policy(
     policy_class: Type[TorchPolicy],
-    name: str,
-    loss_fn: Callable[
-        [Policy, ModelV2, Type[TorchDistributionWrapper], SampleBatch], TensorType
-    ],
-    stats_fn: Callable[[Policy, SampleBatch], Dict[str, TensorType]],
     sum_loss: bool = False,
 ) -> Type[TorchPolicy]:
     """
@@ -117,91 +99,79 @@ def add_supervised_loss_to_policy(
     if there is any goal block there.
     """
 
-    def loss_with_supervision(
-        policy: Policy,
-        model: TorchModelV2,
-        dist_class: Type[MbagAutoregressiveActionDistribution],
-        train_batch: SampleBatch,
-    ) -> TensorType:
+    class MbagPolicy(policy_class):  # type: ignore
+        def loss(
+            self,
+            model: TorchModelV2,
+            dist_class: Type[MbagAutoregressiveActionDistribution],
+            train_batch: SampleBatch,
+        ) -> TensorType:
+            loss = super().loss(model, dist_class, train_batch)
+            assert not isinstance(loss, list)
 
-        import torch
+            (world_obs,) = restore_original_dimensions(
+                train_batch[SampleBatch.OBS],
+                obs_space=self.observation_space,
+                tensorlib=torch,
+            )
+            goal_block_ids = world_obs[:, 2]
 
-        loss = loss_fn(policy, model, dist_class, train_batch)
-        assert not isinstance(loss, list)
-
-        (world_obs,) = restore_original_dimensions(
-            train_batch[SampleBatch.OBS],
-            obs_space=policy.observation_space,
-            tensorlib=torch,
-        )
-        goal_block_ids = world_obs[:, 2]
-
-        actions = train_batch[SampleBatch.ACTIONS].long()
-        place_block_ids = goal_block_ids.flatten(start_dim=1)[
-            torch.arange(
-                0, actions.size()[0], dtype=torch.long, device=goal_block_ids.device
-            ),
-            actions[:, 1],
-        ]
-        logits, state = model.from_batch(train_batch, is_training=True)
-        action_dist = dist_class(logits, model)
-        place_block_loss = -action_dist._block_id_distribution(
-            actions[:, 0],
-            actions[:, 1],
-        ).logp(place_block_ids)
-
-        # We only care about place block actions at places where there are blocks in the
-        # goal.
-        place_block_mask = (actions[:, 0] == MbagAction.PLACE_BLOCK) & (
-            place_block_ids != MinecraftBlocks.AIR
-        )
-        if torch.any(place_block_mask):
-            place_block_loss = place_block_loss[place_block_mask]
-            if sum_loss:
-                place_block_loss = place_block_loss.sum()
+            actions = train_batch[SampleBatch.ACTIONS].long()
+            place_block_ids = goal_block_ids.flatten(start_dim=1)[
+                torch.arange(
+                    0, actions.size()[0], dtype=torch.long, device=goal_block_ids.device
+                ),
+                actions[:, 1],
+            ]
+            if hasattr(model, "logits"):
+                # Don't recompute logits if we don't have to.
+                logits = model.logits  # type: ignore
             else:
-                place_block_loss = place_block_loss.mean()
-            loss = loss + place_block_loss
-            policy._place_block_loss = place_block_loss  # type: ignore
+                logits, state = model(train_batch)
+            action_dist = dist_class(logits, model)
+            place_block_loss = -action_dist._block_id_distribution(
+                actions[:, 0],
+                actions[:, 1],
+            ).logp(place_block_ids)
 
-        return loss
+            # We only care about place block actions at places where there are blocks in the
+            # goal.
+            place_block_mask = (actions[:, 0] == MbagAction.PLACE_BLOCK) & ~torch.any(
+                place_block_ids[:, None]
+                == MbagAutoregressiveActionDistribution.PLACEABLE_BLOCK_MASK[None, :],
+                dim=1,
+            )
+            if torch.any(place_block_mask):
+                place_block_loss = place_block_loss[place_block_mask]
+                if sum_loss:
+                    place_block_loss = place_block_loss.sum()
+                else:
+                    place_block_loss = place_block_loss.mean()
+                loss = loss + place_block_loss
+                model.tower_stats["place_block_loss"] = place_block_loss
 
-    def supervision_stats(
-        policy: TorchPolicy, train_batch: SampleBatch
-    ) -> Dict[str, TensorType]:
-        stats = stats_fn(policy, train_batch)
-        if hasattr(policy, "_place_block_loss"):
-            stats["place_block_loss"] = policy._place_block_loss  # type: ignore
-        return stats
+            return loss
 
-    return policy_class.with_updates(  # type: ignore
-        name=name,
-        loss_fn=loss_with_supervision,
-        stats_fn=supervision_stats,
-    )
+        def extra_grad_info(self, train_batch: SampleBatch) -> Dict[str, TensorType]:
+            info = super().extra_grad_info(train_batch)
+            try:
+                info["place_block_loss"] = torch.mean(
+                    torch.stack(self.get_tower_stats("place_block_loss"))
+                )
+            except AssertionError:
+                info["place_block_loss"] = torch.nan
+            return cast(
+                Dict[str, TensorType],
+                convert_to_numpy(info),
+            )
+
+    MbagPolicy.__name__ = "Mbag" + policy_class.__name__
+    return MbagPolicy
 
 
-MbagPPOTorchPolicy = add_supervised_loss_to_policy(
-    PPOTorchPolicy,
-    name="MbagPPOTorchPolicy",
-    loss_fn=ppo_surrogate_loss,
-    stats_fn=ppo_stats,
-)
-
-MbagAPPOTorchPolicy = add_supervised_loss_to_policy(
-    AsyncPPOTorchPolicy,
-    name="MbagAPPOTorchPolicy",
-    loss_fn=appo_surrogate_loss,
-    stats_fn=appo_stats,
-)
-
-MbagVTraceTorchPolicy = add_supervised_loss_to_policy(
-    VTraceTorchPolicy,
-    name="MbagVTraceTorchPolicy",
-    loss_fn=build_vtrace_loss,
-    stats_fn=vtrace_stats,
-    sum_loss=True,
-)
+MbagPPOTorchPolicy = add_supervised_loss_to_policy(PPOTorchPolicy)
+MbagAPPOTorchPolicy = add_supervised_loss_to_policy(AsyncPPOTorchPolicy)
+MbagVTraceTorchPolicy = add_supervised_loss_to_policy(VTraceTorchPolicy, sum_loss=True)
 
 
 MBAG_POLICIES = {

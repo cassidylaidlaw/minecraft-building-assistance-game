@@ -56,7 +56,7 @@ class GrabcraftGoalGenerator(GoalGenerator):
         "data_dir": "data/grabcraft",
         "subset": "train",
         "force_single_cc": False,
-        "use_limited_block_set": False,
+        "use_limited_block_set": True,
     }
 
     config: GrabcraftGoalConfig

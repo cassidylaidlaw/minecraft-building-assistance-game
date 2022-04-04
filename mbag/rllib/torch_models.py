@@ -1,4 +1,5 @@
 from typing import Dict, List, Tuple, cast
+import warnings
 import torch
 import numpy as np
 from torch import nn
@@ -10,6 +11,7 @@ from ray.rllib.models.catalog import ModelCatalog
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
 
 from mbag.environment.blocks import MinecraftBlocks
+from mbag.environment.types import CURRENT_BLOCKS, GOAL_BLOCKS, PLAYER_LOCATIONS
 
 
 class MbagModel(ABC, TorchModelV2):
@@ -40,6 +42,9 @@ class MbagConvolutionalModelConfig(TypedDict, total=False):
     """Number of extra layers for the block ID head."""
     num_unet_layers: int
     """Number of layers to include in a UNet3d, if any."""
+    unet_grow_factor: float
+    fake_state: bool
+    """Whether to add fake state to this model so that it's treated as recurrent."""
 
 
 CONV_DEFAULT_CONFIG: MbagConvolutionalModelConfig = {
@@ -52,6 +57,8 @@ CONV_DEFAULT_CONFIG: MbagConvolutionalModelConfig = {
     "hidden_channels": 32,
     "num_block_id_layers": 1,
     "num_unet_layers": 0,
+    "unet_grow_factor": 2.0,
+    "fake_state": False,
 }
 
 
@@ -67,6 +74,7 @@ class UNet3d(nn.Module):
         out_channels: int,
         num_layers: int,
         fc_layer: nn.Module = nn.Identity(),
+        grow_factor: float = 2.0,
     ):
         """
         Expects inputs of shape
@@ -88,8 +96,9 @@ class UNet3d(nn.Module):
         for layer_index in range(self.num_layers):
             down_layer = nn.Sequential(
                 nn.Conv3d(
-                    in_channels=self.in_channels * (2**layer_index),
-                    out_channels=self.in_channels * 2 * (2**layer_index),
+                    in_channels=self.in_channels * int(grow_factor**layer_index),
+                    out_channels=self.in_channels
+                    * int(grow_factor ** (layer_index + 1)),
                     kernel_size=3,
                     stride=2,
                     padding=1,
@@ -101,8 +110,10 @@ class UNet3d(nn.Module):
 
             up_layer = nn.Sequential(
                 nn.ConvTranspose3d(
-                    in_channels=self.in_channels * 4 * (2**layer_index),
-                    out_channels=self.in_channels * (2**layer_index),
+                    in_channels=self.in_channels
+                    * 2
+                    * int(grow_factor ** (layer_index + 1)),
+                    out_channels=self.in_channels * int(grow_factor**layer_index),
                     kernel_size=3,
                     stride=2,
                     padding=1,
@@ -116,7 +127,7 @@ class UNet3d(nn.Module):
             layer_size = (layer_size + 1) // 2
 
         self.fc_layer_size = (
-            (layer_size**3) * self.in_channels * (2**self.num_layers)
+            (layer_size**3) * self.in_channels * int(grow_factor**self.num_layers)
         )
 
         # Final 1x1x1 convolution to get the right number of out channels.
@@ -150,6 +161,8 @@ class MbagConvolutionalModel(MbagModel, nn.Module):
     Has an all-convolutional backbone and separate heads for each part of the
     autoregressive action distribution.
     """
+
+    _logits: torch.Tensor
 
     def __init__(
         self,
@@ -187,14 +200,23 @@ class MbagConvolutionalModel(MbagModel, nn.Module):
         self.hidden_channels = extra_config["hidden_channels"]
         self.num_block_id_layers = extra_config["num_block_id_layers"]
         self.num_unet_layers = extra_config["num_unet_layers"]
+        self.unet_grow_factor = extra_config["unet_grow_factor"]
+        self.fake_state: bool = extra_config["fake_state"]
 
-        self.in_planes = 1 if self.mask_goal else 2  # TODO: update if we add more
+        # We have in-planes for current blocks, player locations, and
+        # goal blocks if mask_goal is False.
+        self.in_planes = 2 if self.mask_goal else 3  # TODO: update if we add more
         self.in_channels = self.in_planes * self.embedding_size
         if self.use_extra_features:
             self.in_channels += 1
 
         self.block_id_embedding = nn.Embedding(
             num_embeddings=len(MinecraftBlocks.ID2NAME),
+            embedding_dim=self.embedding_size,
+        )
+        self.player_id_embedding = nn.Embedding(
+            # Assume there are no more than 16 players, could be an issue down the line?
+            num_embeddings=16,
             embedding_dim=self.embedding_size,
         )
 
@@ -259,6 +281,7 @@ class MbagConvolutionalModel(MbagModel, nn.Module):
                 self.hidden_channels,
                 self.action_type_space.n + self.hidden_channels,
                 self.num_unet_layers,
+                grow_factor=self.unet_grow_factor,
             )
             backbone_layers.append(self.unet)
         else:
@@ -270,11 +293,17 @@ class MbagConvolutionalModel(MbagModel, nn.Module):
 
         # TODO: embed other block info?
         self._world_obs = self._world_obs.long()
-        embedded_blocks = self.block_id_embedding(self._world_obs[:, 0])
+        embedded_blocks = self.block_id_embedding(self._world_obs[:, CURRENT_BLOCKS])
         embedded_obs_pieces = [embedded_blocks]
         if not self.mask_goal:
-            embedded_goal_blocks = self.block_id_embedding(self._world_obs[:, 2])
+            embedded_goal_blocks = self.block_id_embedding(
+                self._world_obs[:, GOAL_BLOCKS]
+            )
             embedded_obs_pieces.append(embedded_goal_blocks)
+        embedded_player_locations = self.player_id_embedding(
+            self._world_obs[:, PLAYER_LOCATIONS]
+        )
+        embedded_obs_pieces.append(embedded_player_locations)
         if self.use_extra_features:
             # Feature for if goal block is the same as the current block at each
             # location.
@@ -288,11 +317,16 @@ class MbagConvolutionalModel(MbagModel, nn.Module):
         if self.vf_share_layers:
             self._backbone_out = self.backbone(self._embedded_obs)
             self._backbone_out_shape = self._backbone_out.size()[1:]
-            return self._backbone_out.flatten(start_dim=1), []
+            self._logits = self._backbone_out.flatten(start_dim=1)
         else:
             backbone_out = self.action_backbone(self._embedded_obs)
             self._backbone_out_shape = backbone_out.size()[1:]
-            return backbone_out.flatten(start_dim=1), []
+            self._logits = backbone_out.flatten(start_dim=1)
+        return self._logits, state
+
+    @property
+    def logits(self) -> torch.Tensor:
+        return self._logits
 
     def block_id_model(self, head_input: torch.Tensor) -> torch.Tensor:
         return cast(torch.Tensor, self.block_id_head(head_input))
@@ -303,21 +337,30 @@ class MbagConvolutionalModel(MbagModel, nn.Module):
         else:
             return self.value_head(self.value_backbone(self._embedded_obs)).squeeze(1)
 
+    def get_initial_state(self):
+        if self.fake_state:
+            return [np.zeros(1)]
+        else:
+            return super().get_initial_state()
+
 
 ModelCatalog.register_custom_model("mbag_convolutional_model", MbagConvolutionalModel)
 
 
 class MbagRecurrentConvolutionalModelConfig(MbagConvolutionalModelConfig):
-    pass
+    num_value_layers: int
 
 
 RECURRENT_CONV_DEFAULT_CONFIG: MbagRecurrentConvolutionalModelConfig = {
     **CONV_DEFAULT_CONFIG,  # type: ignore
+    "num_value_layers": 0,
 }
 
 
 class AddTimeDimRNN(nn.Module):
     _rnn_state: Tuple[torch.Tensor, torch.Tensor]
+    _outputs: torch.Tensor
+    _new_state: List[torch.Tensor]
 
     def __init__(self, rnn: nn.Module):
         super().__init__()
@@ -337,14 +380,20 @@ class AddTimeDimRNN(nn.Module):
             inputs,
             [self._rnn_state[0].unsqueeze(0), self._rnn_state[1].unsqueeze(0)],
         )
+        self._outputs = outputs.reshape(-1, *input_shape)
         self._new_state = [new_state[0].squeeze(0), new_state[1].squeeze(0)]
-        return cast(torch.Tensor, outputs.reshape(-1, *input_shape))
+        return self._outputs
+
+    def get_outputs(self) -> torch.Tensor:
+        return self._outputs
 
     def get_new_state(self):
         return self._new_state
 
 
 class MbagRecurrentConvolutionalModel(MbagModel, nn.Module):
+    _logits: torch.Tensor
+
     def __init__(
         self,
         obs_space: spaces.Space,
@@ -357,8 +406,8 @@ class MbagRecurrentConvolutionalModel(MbagModel, nn.Module):
         nn.Module.__init__(self)
         super().__init__(obs_space, action_space, num_outputs, model_config, name)
 
-        extra_config = CONV_DEFAULT_CONFIG
-        extra_config.update(cast(MbagRecurrentConvolutionalModelConfig, kwargs))
+        extra_config = RECURRENT_CONV_DEFAULT_CONFIG
+        extra_config.update(kwargs)  # type: ignore
 
         self.conv_model = MbagConvolutionalModel(
             obs_space,
@@ -376,6 +425,30 @@ class MbagRecurrentConvolutionalModel(MbagModel, nn.Module):
         self.rnn = AddTimeDimRNN(self.lstm)
         unet.set_fc_layer(self.rnn)
 
+        if self.model_config["vf_share_layers"]:
+            value_layers: List[nn.Module] = []
+            hidden_channels = extra_config["hidden_channels"]
+            for layer_index in range(extra_config["num_value_layers"]):
+                value_layers.append(
+                    nn.Linear(
+                        self.rnn_hidden_dim if layer_index == 0 else hidden_channels,
+                        hidden_channels,
+                    )
+                )
+                value_layers.append(nn.LeakyReLU())
+            self.value_head = nn.Sequential(
+                *value_layers,
+                nn.Linear(
+                    self.rnn_hidden_dim if len(value_layers) == 0 else hidden_channels,
+                    1,
+                    bias=True,
+                ),
+            )
+        else:
+            warnings.warn(
+                "without vf_share_layers, the value function will not be recurrent"
+            )
+
     def get_initial_state(self):
         # Place hidden states on same device as model.
         param = next(iter(self.lstm.parameters()))
@@ -386,7 +459,10 @@ class MbagRecurrentConvolutionalModel(MbagModel, nn.Module):
         return h
 
     def value_function(self):
-        return self.conv_model.value_function()
+        if self.model_config["vf_share_layers"]:
+            return self.value_head(self.rnn.get_outputs()).squeeze(1)
+        else:
+            return self.conv_model.value_function()
 
     def forward(
         self,
@@ -395,10 +471,14 @@ class MbagRecurrentConvolutionalModel(MbagModel, nn.Module):
         seq_lens: torch.Tensor,
     ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
         self.rnn.set_state_seq_lens(state, seq_lens)
-        logits, _ = self.conv_model.forward(input_dict, state, seq_lens)
+        self._logits, _ = self.conv_model.forward(input_dict, state, seq_lens)
         new_state = self.rnn.get_new_state()
 
-        return logits, new_state
+        return self._logits, new_state
+
+    @property
+    def logits(self) -> torch.Tensor:
+        return self._logits
 
     def block_id_model(self, inputs: torch.Tensor) -> torch.Tensor:
         return self.conv_model.block_id_model(inputs)
