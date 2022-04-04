@@ -11,6 +11,7 @@ from mbag.agents.heuristic_agents import PriorityQueueAgent
 from mbag.environment.goals.grabcraft import (
     GrabcraftGoalGenerator,
     CroppedGrabcraftGoalGenerator,
+    SeamCarvingGrabcraftGoalGenerator,
 )
 
 
@@ -171,3 +172,48 @@ def test_generate_crop_json():
         size = generator._get_structure_size(structure_json)
         print(size)
         assert size[0] <= 8 and size[1] <= 9 and size[2] <= 8
+
+
+def test_carving_generator():
+    goal_generator = SeamCarvingGrabcraftGoalGenerator(
+        {
+            "subset": "train",
+            "use_limited_block_set": True,
+        }
+    )
+    size: WorldSize
+    for size in [(5, 5, 5), (8, 8, 8), (10, 10, 10), (50, 50, 50)]:
+        blocks = goal_generator.generate_goal(size)
+        assert blocks.size == size
+
+
+@pytest.mark.xfail(strict=False)
+def test_carving_generator_in_malmo():
+    evaluator = MbagEvaluator(
+        {
+            "world_size": (12, 12, 12),
+            "num_players": 1,
+            "horizon": 1000,
+            "goal_generator": SeamCarvingGrabcraftGoalGenerator,
+            "goal_generator_config": {
+                "data_dir": "data/grabcraft",
+                "subset": "train",
+                "use_limited_block_set": True,
+                "density_cost_weight": 0.8,
+            },
+            "goal_visibility": [True],
+            "malmo": {
+                "use_malmo": True,
+                "use_spectator": False,
+                "video_dir": None,
+            },
+        },
+        [
+            (
+                PriorityQueueAgent,
+                {},
+            ),
+        ],
+    )
+    episode_info = evaluator.rollout()
+    assert episode_info.cumulative_reward > 0

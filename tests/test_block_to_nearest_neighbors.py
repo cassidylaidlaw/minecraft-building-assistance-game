@@ -2,7 +2,7 @@ import numpy as np
 import itertools
 
 from mbag.environment.blocks import MinecraftBlocks
-from mbag.environment.goals import RandomGoalGenerator
+from mbag.environment.goals.grabcraft import CroppedGrabcraftGoalGenerator
 
 
 def test_not_same():
@@ -42,13 +42,13 @@ def test_majority():
 
 
 def test_large():
-    blocks = RandomGoalGenerator({}).generate_goal((10, 10, 10))
+    blocks = CroppedGrabcraftGoalGenerator({}).generate_goal((10, 10, 10))
     blocks.blocks[4:6, 4, 5] = MinecraftBlocks.AUTO
     blocks.block_to_nearest_neighbors((4, 4, 5))
 
 
 def test_many_auto_blocks():
-    blocks = RandomGoalGenerator({}).generate_goal((10, 10, 10))
+    blocks = CroppedGrabcraftGoalGenerator({}).generate_goal((10, 10, 10))
     blocks.blocks[4:7, 4:7, 4:7] = MinecraftBlocks.AUTO
     blocks.block_to_nearest_neighbors((5, 5, 5))
 
