@@ -362,6 +362,44 @@ def make_mbag_sacred_config(ex: Experiment):  # noqa
 make_mbag_sacred_config(ex)
 
 
+@ex.named_config
+def no_lstm_resnet_10_64_channels():
+    hidden_channels = 64
+    model = "convolutional"
+    mask_goal = True
+    use_extra_features = False
+    num_unet_layers = 0
+    num_layers = 10
+    use_resnet = True
+
+
+@ex.named_config
+def unet_4_grow_15_resnet_10_64_channels():
+    hidden_channels = 64
+    model = "convolutional"
+    mask_goal = True
+    use_extra_features = False
+    num_unet_layers = 4
+    unet_grow_factor = 1.5
+    num_layers = 10
+    use_resnet = True
+
+
+@ex.named_config
+def train_assistant():
+    multiagent_mode = "cross_play"
+    train_batch_size = 20000
+    kl_target = 0.01
+    entropy_coeff_horizon = 2e6
+    num_players = 2
+    sgd_minibatch_size = 1200
+    own_reward_prop = 1
+    own_reward_prop_horizon = None
+    rollout_fragment_length = 400
+    vf_share_layers = True
+    vf_loss_coeff = 1e-3
+
+
 @ex.automain
 def main(
     config,
