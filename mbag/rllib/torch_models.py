@@ -386,28 +386,37 @@ class MbagConvolutionalModel(MbagModel, nn.Module):
 
         self._embedded_obs = embedded_obs.permute(0, 4, 1, 2, 3)
 
-        if self.vf_share_layers:
-            self._backbone_out = self.backbone(self._embedded_obs)
-            self._backbone_out_shape = self._backbone_out.size()[1:]
-            self._logits = self._backbone_out.flatten(start_dim=1)
-        else:
-            backbone_out = self.action_backbone(self._embedded_obs)
-            self._backbone_out_shape = backbone_out.size()[1:]
-            self._logits = backbone_out.flatten(start_dim=1)
-        return self._logits, state
+        with torch.autocast(self._device.type):
+            if self.vf_share_layers:
+                self._backbone_out = self.backbone(self._embedded_obs)
+                self._backbone_out_shape = self._backbone_out.size()[1:]
+                self._logits = self._backbone_out.flatten(start_dim=1)
+            else:
+                backbone_out = self.action_backbone(self._embedded_obs)
+                self._backbone_out_shape = backbone_out.size()[1:]
+                self._logits = backbone_out.flatten(start_dim=1)
+        return self._logits.float(), state
 
     @property
     def logits(self) -> torch.Tensor:
         return self._logits
 
+    @property
+    def _device(self) -> torch.device:
+        return self._embedded_obs.device
+
     def block_id_model(self, head_input: torch.Tensor) -> torch.Tensor:
-        return cast(torch.Tensor, self.block_id_head(head_input))
+        with torch.autocast(self._device.type):
+            block_id_logits: torch.Tensor = self.block_id_head(head_input)
+        return block_id_logits.float()
 
     def value_function(self):
-        if self.vf_share_layers:
-            return self.value_head(self._backbone_out).squeeze(1)
-        else:
-            return self.value_head(self.value_backbone(self._embedded_obs)).squeeze(1)
+        with torch.autocast(self._device.type):
+            if self.vf_share_layers:
+                vf = self.value_head(self._backbone_out).squeeze(1)
+            else:
+                vf = self.value_head(self.value_backbone(self._embedded_obs)).squeeze(1)
+        return vf.float()
 
     def get_initial_state(self):
         if self.fake_state:

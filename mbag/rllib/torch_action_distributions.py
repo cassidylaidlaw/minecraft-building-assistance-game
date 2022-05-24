@@ -52,6 +52,11 @@ class MbagAutoregressiveActionDistribution(TorchDistributionWrapper):
     _cached_block_location = None
     _cached_block_id_logits = None
 
+    _cached_action_type_location_distribution: Optional[
+        "ActionTypeLocationDistribution"
+    ]
+    _cached_block_id_distribution: Optional[TorchCategorical]
+
     PLACEABLE_BLOCK_MASK = torch.tensor(
         [
             block_id in MinecraftBlocks.PLACEABLE_BLOCK_IDS
@@ -73,6 +78,9 @@ class MbagAutoregressiveActionDistribution(TorchDistributionWrapper):
         self.model_device = next(iter(cast(nn.Module, self.model).parameters())).device
         self.inputs_device = self.inputs.device
         self.inputs = self.inputs.to(self.model_device)
+
+        self._cached_action_type_location_distribution = None
+        self._cached_block_id_distribution = None
 
     def sample(self):
         # First, sample a block_location and action_type.
@@ -186,52 +194,63 @@ class MbagAutoregressiveActionDistribution(TorchDistributionWrapper):
     def _action_type_location_distribution(
         self, mask_logit=-1e8
     ) -> "ActionTypeLocationDistribution":
-        action_type_location_logits = self.inputs[:, : MbagAction.NUM_ACTION_TYPES]
-        return ActionTypeLocationDistribution(
-            action_type_location_logits, self.model, self._world_obs
-        )
+        if self._cached_action_type_location_distribution is None:
+            action_type_location_logits = self.inputs[:, : MbagAction.NUM_ACTION_TYPES]
+            self._cached_action_type_location_distribution = (
+                ActionTypeLocationDistribution(
+                    action_type_location_logits, self.model, self._world_obs
+                )
+            )
+        return self._cached_action_type_location_distribution
 
     def _block_id_distribution(
         self, action_type, block_location, mask_logit=-1e8, skip_cache=False
     ) -> TorchCategorical:
-        if (
-            self._cached_block_id_logits is None
-            or skip_cache
-            or not (
-                torch.all(self._cached_action_type == action_type)
-                and torch.all(self._cached_block_location == block_location)
-            )
-        ):
-            location_inputs = self.inputs.flatten(start_dim=2)[
-                torch.arange(self.inputs.size()[0]), :, block_location
-            ]
-            assert location_inputs.size() == self.inputs.size()[:2]
-            hidden_state = location_inputs[:, MbagAction.NUM_ACTION_TYPES :]
-            hidden_state_with_action_type = torch.cat(
-                [
-                    hidden_state,
-                    F.one_hot(action_type, MbagAction.NUM_ACTION_TYPES),
-                ],
-                dim=1,
-            )
-            block_id_logits = self.model.block_id_model(
-                hidden_state_with_action_type,
-            )
-            if not skip_cache:
-                self._cached_block_id_logits = block_id_logits
-                self._cached_action_type = action_type
-                self._cached_block_location = block_location
+        if self._cached_block_id_distribution is None or skip_cache:
+            if (
+                self._cached_block_id_logits is None
+                or skip_cache
+                or not (
+                    torch.all(self._cached_action_type == action_type)
+                    and torch.all(self._cached_block_location == block_location)
+                )
+            ):
+                location_inputs = self.inputs.flatten(start_dim=2)[
+                    torch.arange(self.inputs.size()[0]), :, block_location
+                ]
+                assert location_inputs.size() == self.inputs.size()[:2]
+                hidden_state = location_inputs[:, MbagAction.NUM_ACTION_TYPES :]
+                hidden_state_with_action_type = torch.cat(
+                    [
+                        hidden_state,
+                        F.one_hot(action_type, MbagAction.NUM_ACTION_TYPES),
+                    ],
+                    dim=1,
+                )
+                block_id_logits = self.model.block_id_model(
+                    hidden_state_with_action_type,
+                )
+                if not skip_cache:
+                    self._cached_block_id_logits = block_id_logits
+                    self._cached_action_type = action_type
+                    self._cached_block_location = block_location
+            else:
+                block_id_logits = self._cached_block_id_logits
+
+            # Mask out logits for placing unplaceable blocks.
+            block_id_logits = block_id_logits.clone()
+            block_id_logits[
+                (action_type == MbagAction.PLACE_BLOCK)[:, None]
+                & ~MbagAutoregressiveActionDistribution.PLACEABLE_BLOCK_MASK[None, :]
+            ] = mask_logit
+
+            block_id_distribution: TorchCategorical = TorchCategorical(block_id_logits)
         else:
-            block_id_logits = self._cached_block_id_logits
+            block_id_distribution = self._cached_block_id_distribution
 
-        # Mask out logits for placing unplaceable blocks.
-        block_id_logits = block_id_logits.clone()
-        block_id_logits[
-            (action_type == MbagAction.PLACE_BLOCK)[:, None]
-            & ~MbagAutoregressiveActionDistribution.PLACEABLE_BLOCK_MASK[None, :]
-        ] = mask_logit
-
-        return TorchCategorical(block_id_logits)  # type: ignore
+        if not skip_cache:
+            self._cached_block_id_distribution = block_id_distribution
+        return block_id_distribution
 
     def _calculate_logp(
         self,
