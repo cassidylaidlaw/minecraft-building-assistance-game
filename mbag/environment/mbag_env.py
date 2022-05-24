@@ -62,11 +62,17 @@ class MalmoConfigDict(TypedDict, total=False):
     """
 
 
-class RewardsConfigDict(TypedDict):
+class RewardsConfigDict(TypedDict, total=False):
     noop: float
     """
     The reward for doing any action which does nothing. This is usually either zero,
     or negative to discourage noops.
+    """
+
+    action: float
+    """
+    The reward for doing any action which is not a noop. This could be negative to
+    introduce some cost for acting.
     """
 
     place_wrong: float
@@ -119,11 +125,19 @@ class MbagConfigDict(TypedDict, total=False):
     goal.
     """
 
+    timestep_skip: List[int]
+    """
+    Each element is how often the corresponding player can interact with the
+    environment, i.e. 1 means every timestep, 5 means only every 5th timestep.
+    """
+
     malmo: MalmoConfigDict
     """Configuration options for connecting to Minecraft with Project Malmo."""
 
-    rewards: RewardsConfigDict
-    """Configuration options for environment reward."""
+    rewards: Union[RewardsConfigDict, List[RewardsConfigDict]]
+    """
+    Configuration options for environment reward, optionally different for each player.
+    """
 
     abilities: AbilitiesConfigDict
     """Configuration for limits placed on the agent (flying, teleportation, inventory, etc...) """
@@ -136,6 +150,7 @@ DEFAULT_CONFIG: MbagConfigDict = {
     "goal_generator": RandomGoalGenerator,
     "goal_generator_config": {},
     "goal_visibility": [True, False],
+    "timestep_skip": [1] * 10,
     "malmo": {
         "use_malmo": False,
         "player_names": None,
@@ -143,9 +158,10 @@ DEFAULT_CONFIG: MbagConfigDict = {
         "video_dir": None,
     },
     "rewards": {
-        "noop": 0,
-        "place_wrong": 0,
-        "own_reward_prop": 0,
+        "noop": 0.0,
+        "action": 0.0,
+        "place_wrong": 0.0,
+        "own_reward_prop": 0.0,
         "own_reward_prop_horizon": None,
     },
     "abilities": {"teleportation": True, "flying": True},
@@ -169,6 +185,19 @@ class MbagEnv(object):
 
         self.config["malmo"] = copy.deepcopy(DEFAULT_CONFIG["malmo"])
         self.config["malmo"].update(config.get("malmo", {}))
+        passed_rewards_config = config.get("rewards", {})
+        if isinstance(passed_rewards_config, list):
+            rewards_configs = []
+            for incomplete_rewards_config in passed_rewards_config:
+                rewards_config = copy.deepcopy(DEFAULT_CONFIG["rewards"])
+                assert isinstance(rewards_config, dict)
+                rewards_config.update(incomplete_rewards_config)
+                rewards_configs.append(rewards_config)
+            self.config["rewards"] = rewards_configs
+        else:
+            self.config["rewards"] = copy.deepcopy(DEFAULT_CONFIG["rewards"])
+            assert isinstance(self.config["rewards"], dict)
+            self.config["rewards"].update(passed_rewards_config)
 
         if (
             self.config["malmo"]["video_dir"] is not None
@@ -271,9 +300,15 @@ class MbagEnv(object):
         infos: List[MbagInfoDict] = []
 
         for player_index, player_action_tuple in enumerate(action_tuples):
-            player_reward, player_info = self._step_player(
-                player_index, player_action_tuple
-            )
+            if self.timestep % self.config["timestep_skip"][player_index] == 0:
+                player_reward, player_info = self._step_player(
+                    player_index, player_action_tuple
+                )
+            else:
+                player_reward, player_info = self._step_player(
+                    player_index,
+                    (MbagAction.NOOP, 0, 0),
+                )
             reward += player_reward
             own_rewards.append(player_reward)
             infos.append(player_info)
@@ -289,7 +324,8 @@ class MbagEnv(object):
             for player_index in range(self.config["num_players"])
         ]
         rewards = [
-            self._get_player_reward(reward, own_reward) for own_reward in own_rewards
+            self._get_player_reward(player_index, reward, own_reward)
+            for player_index, own_reward in enumerate(own_rewards)
         ]
         dones = [self._done()] * self.config["num_players"]
 
@@ -391,10 +427,10 @@ class MbagEnv(object):
             # Calculate reward based on progress towards goal.
             new_block = self.current_blocks[action.block_location]
             prev_goal_similarity = self._get_goal_similarity(
-                prev_block, goal_block, partial_credit=True
+                prev_block, goal_block, partial_credit=True, player_index=player_index
             )
             new_goal_similarity = self._get_goal_similarity(
-                new_block, goal_block, partial_credit=True
+                new_block, goal_block, partial_credit=True, player_index=player_index
             )
             reward = new_goal_similarity - prev_goal_similarity
         elif action.action_type in [
@@ -443,7 +479,9 @@ class MbagEnv(object):
                 else:
                     noop = True
         if noop:
-            reward += self.config["rewards"]["noop"]
+            reward += self._get_reward_config_for_player(player_index)["noop"]
+        else:
+            reward += self._get_reward_config_for_player(player_index)["action"]
 
         info: MbagInfoDict = {
             "goal_similarity": self._get_goal_similarity(
@@ -451,7 +489,7 @@ class MbagEnv(object):
                 self.goal_blocks[:],
             ).sum(),
             "own_reward": reward,
-            "own_reward_prop": self._get_own_reward_prop(),
+            "own_reward_prop": self._get_own_reward_prop(player_index),
         }
 
         return reward, info
@@ -504,6 +542,7 @@ class MbagEnv(object):
         current_block: Tuple[np.ndarray, np.ndarray],
         goal_block: Tuple[np.ndarray, np.ndarray],
         partial_credit: bool = False,
+        player_index: Optional[int] = None,
     ):
         """
         Get the similarity between this block and the goal block, used to calculate
@@ -517,10 +556,11 @@ class MbagEnv(object):
         similarity = np.zeros_like(current_block_id, dtype=float)
         if partial_credit:
             # Give partial credit for placing the wrong block type.
+            assert player_index is not None
             similarity[
                 (goal_block_id != MinecraftBlocks.AIR)
                 & (current_block_id != MinecraftBlocks.AIR)
-            ] = self.config["rewards"]["place_wrong"]
+            ] = self._get_reward_config_for_player(player_index)["place_wrong"]
         similarity[goal_block_id == current_block_id] = 1
         return similarity
 
@@ -564,17 +604,26 @@ class MbagEnv(object):
             assert world_obs[4, x, y, z] == 0, "players are overlapping"
             world_obs[4, x, y, z] = marker
 
-    def _get_own_reward_prop(self) -> float:
-        own_reward_prop = self.config["rewards"]["own_reward_prop"]
-        own_reward_prop_horizon = self.config["rewards"]["own_reward_prop_horizon"]
+    def _get_reward_config_for_player(self, player_index: int) -> RewardsConfigDict:
+        if isinstance(self.config["rewards"], list):
+            return self.config["rewards"][player_index]
+        else:
+            return self.config["rewards"]
+
+    def _get_own_reward_prop(self, player_index: int) -> float:
+        reward_config = self._get_reward_config_for_player(player_index)
+        own_reward_prop = reward_config["own_reward_prop"]
+        own_reward_prop_horizon = reward_config["own_reward_prop_horizon"]
         if own_reward_prop_horizon is not None:
             own_reward_prop *= max(
                 1 - self.global_timestep / own_reward_prop_horizon, 0
             )
         return own_reward_prop
 
-    def _get_player_reward(self, reward: float, own_reward: float) -> float:
-        own_reward_prop = self._get_own_reward_prop()
+    def _get_player_reward(
+        self, player_index: int, reward: float, own_reward: float
+    ) -> float:
+        own_reward_prop = self._get_own_reward_prop(player_index)
         return own_reward_prop * own_reward + (1 - own_reward_prop) * reward
 
     def _update_state_from_malmo(self):

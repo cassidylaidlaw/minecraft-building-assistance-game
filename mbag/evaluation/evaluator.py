@@ -1,13 +1,17 @@
 from dataclasses import dataclass
-from typing import List, Tuple, Type
+from typing import Any, List, Tuple, Type
 
 import numpy as np
 
 from mbag.agents.mbag_agent import MbagAgent
 from mbag.environment.mbag_env import MbagEnv, MbagConfigDict
+from mbag.environment.types import MbagInfoDict
 
 
-MbagAgentConfig = Tuple[Type[MbagAgent], dict]
+MbagAgentConfig = Tuple[Type[MbagAgent], Any]
+"""
+An MbagAgent subclass together with the agent config for that agent.
+"""
 
 
 @dataclass
@@ -15,6 +19,14 @@ class EpisodeInfo:
     cumulative_reward: float
     length: int
     last_obs: List[Tuple[np.ndarray]]
+    last_infos: List[MbagInfoDict]
+
+    def to_json(self) -> dict:
+        return {
+            "cumulative_reward": self.cumulative_reward,
+            "length": self.length,
+            "last_infos": self.last_infos,
+        }
 
 
 class MbagEvaluator(object):
@@ -69,4 +81,5 @@ class MbagEvaluator(object):
             cumulative_reward=cumulative_reward,
             length=timestep,
             last_obs=all_obs,
+            last_infos=all_infos,
         )

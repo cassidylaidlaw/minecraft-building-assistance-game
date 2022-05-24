@@ -1,5 +1,5 @@
 from abc import ABC
-from typing import List, cast
+from typing import Any, List, cast
 from mbag.environment.blocks import MinecraftBlocks
 import numpy as np
 
@@ -12,10 +12,10 @@ class MbagAgent(ABC):
     An MBAG agent which chooses actions based on observations.
     """
 
-    agent_config: dict
+    agent_config: Any
     env_config: MbagConfigDict
 
-    def __init__(self, agent_config: dict, env_config: MbagConfigDict):
+    def __init__(self, agent_config: Any, env_config: MbagConfigDict):
         self.agent_config = agent_config
         self.env_config = env_config
 

@@ -213,9 +213,12 @@ class GrabcraftGoalGenerator(GoalGenerator):
         ) as structure_file:
             structure_json: StructureJson = json.load(structure_file)
 
-        _, (max_x, max_y, max_z) = self._get_structure_bounds(structure_json)
-        structure_size = (max_x + 1, max_y + 1, max_z + 1)
-        structure = MinecraftBlocks(structure_size)
+        (min_x, min_y, min_z), (max_x, max_y, max_z) = self._get_structure_bounds(
+            structure_json
+        )
+        structure = MinecraftBlocks(
+            (max_x - min_x + 1, max_y - min_y + 1, max_z - min_z + 1)
+        )
         structure.blocks[:] = MinecraftBlocks.AIR
         structure.block_states[:] = 0
         for y_str, y_layer in structure_json.items():
@@ -228,18 +231,18 @@ class GrabcraftGoalGenerator(GoalGenerator):
                     if block_variant is None:
                         logger.warning(f"no map entry for \"{block['name']}\"")
                         structure.blocks[
-                            x - 1,
-                            y - 1,
-                            z - 1,
+                            x - min_x,
+                            y - min_y,
+                            z - min_z,
                         ] = MinecraftBlocks.AUTO
                     else:
                         block_name, variant_name = block_variant
                         block_id = MinecraftBlocks.NAME2ID.get(block_name)
                         if block_id is not None:
                             structure.blocks[
-                                x - 1,
-                                y - 1,
-                                z - 1,
+                                x - min_x,
+                                y - min_y,
+                                z - min_z,
                             ] = block_id
                         else:
                             return None
