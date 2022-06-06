@@ -43,10 +43,11 @@ Now, whenever you want to interface with Minecraft from the MBAG environment, fo
 
  1. `cd` to the directory where you installed Malmo and then `cd` to the `Minecraft` subdirectory.
  2. Make sure `JAVA_HOME` is set for Java 8, which you should have installed while building Malmo.
- 3. Run `./launchClient.sh`, once for MBAG player (i.e., run one instance for one player, two instances for two players, etc.).
- 4. Run MBAG with `use_malmo` set to `True` in the configuration and it should automatically connect to the Minecraft instances. For instance, running the following test should connect to a single Minecraft instance and do some basic block breaking and placing:
+ 3. Run `./launchClient.sh`, once for MBAG player (i.e., run one instance for one player, two instances for two players, etc.). This should open a window running Minecraft.
+ 4. Once Minecraft is running, use a seperate terminal tab to run MBAG with `use_malmo` set to `True` in the configuration and it should automatically connect to the Minecraft instances. For instance, running the following test should connect to a single Minecraft instance and do some basic block breaking and placing:
 
         pytest tests/test_evaluator.py -k test_malmo
+ 5. For debugging purposes, it can be useful to take control of the player while the MBAG is controlling it. To do so, press `Return` in the Minecraft window. Pressing `Return` again will give control back to MBAG.
 
 ## Package layout
 

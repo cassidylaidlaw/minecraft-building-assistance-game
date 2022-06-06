@@ -186,6 +186,7 @@ class MbagEnv(object):
         self.config["malmo"] = copy.deepcopy(DEFAULT_CONFIG["malmo"])
         self.config["malmo"].update(config.get("malmo", {}))
         passed_rewards_config = config.get("rewards", {})
+
         if isinstance(passed_rewards_config, list):
             rewards_configs = []
             for incomplete_rewards_config in passed_rewards_config:
@@ -248,6 +249,7 @@ class MbagEnv(object):
         self.global_timestep = global_timestep
 
     def reset(self) -> List[MbagObs]:
+        """Reset Minecraft environment and return player observations for each player."""
         self.timestep = 0
 
         self.current_blocks = MinecraftBlocks(self.config["world_size"])
@@ -300,6 +302,8 @@ class MbagEnv(object):
         infos: List[MbagInfoDict] = []
 
         for player_index, player_action_tuple in enumerate(action_tuples):
+            # For each player, if they are acting this timestep, step the player,
+            # otherwise execute NOOP.
             if self.timestep % self.config["timestep_skip"][player_index] == 0:
                 player_reward, player_info = self._step_player(
                     player_index, player_action_tuple
@@ -495,11 +499,16 @@ class MbagEnv(object):
         return reward, info
 
     def _is_valid_player_space(self, player_location: WorldLocation, player_index: int):
+        """
+        Check to see if the player is able to place a block from their current position.
+        """
+
         proposed_block: BlockLocation = (
             int(np.floor(player_location[0])),
             int(np.floor(player_location[1])),
             int(np.floor(player_location[2])),
         )
+        # Check if block is out of bounds.
         for i in range(3):
             if (
                 proposed_block[i] < 0
