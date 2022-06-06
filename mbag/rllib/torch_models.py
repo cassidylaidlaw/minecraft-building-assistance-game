@@ -1,4 +1,5 @@
-from typing import Dict, List, Tuple, cast
+import contextlib
+from typing import ContextManager, Dict, List, Tuple, cast
 import warnings
 import torch
 import numpy as np
@@ -12,6 +13,9 @@ from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
 
 from mbag.environment.blocks import MinecraftBlocks
 from mbag.environment.types import CURRENT_BLOCKS, GOAL_BLOCKS, PLAYER_LOCATIONS
+
+
+DISABLE_AMP = True
 
 
 class MbagModel(ABC, TorchModelV2):
@@ -386,7 +390,7 @@ class MbagConvolutionalModel(MbagModel, nn.Module):
 
         self._embedded_obs = embedded_obs.permute(0, 4, 1, 2, 3)
 
-        with torch.autocast(self._device.type):
+        with self._autocast():
             if self.vf_share_layers:
                 self._backbone_out = self.backbone(self._embedded_obs)
                 self._backbone_out_shape = self._backbone_out.size()[1:]
@@ -399,19 +403,25 @@ class MbagConvolutionalModel(MbagModel, nn.Module):
 
     @property
     def logits(self) -> torch.Tensor:
-        return self._logits
+        return self._logits.float()
 
     @property
     def _device(self) -> torch.device:
         return self._embedded_obs.device
 
+    def _autocast(self) -> ContextManager:
+        if self._device.type == "cuda" and not DISABLE_AMP:
+            return torch.autocast("cuda", dtype=torch.bfloat16)
+        else:
+            return contextlib.nullcontext()
+
     def block_id_model(self, head_input: torch.Tensor) -> torch.Tensor:
-        with torch.autocast(self._device.type):
+        with self._autocast():
             block_id_logits: torch.Tensor = self.block_id_head(head_input)
         return block_id_logits.float()
 
     def value_function(self):
-        with torch.autocast(self._device.type):
+        with self._autocast():
             if self.vf_share_layers:
                 vf = self.value_head(self._backbone_out).squeeze(1)
             else:
