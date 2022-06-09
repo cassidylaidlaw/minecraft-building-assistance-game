@@ -3,7 +3,7 @@
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
 cd Minecraft
-curl https://www.curseforge.com/minecraft/mc-mods/customskinloader/download/3695974/file -o .minecraft/mods/CustomSkinLoader_ForgeLegacy-14.13.jar 
+curl https://people.eecs.berkeley.edu/~cassidy_laidlaw/CustomSkinLoader_ForgeLegacy-14.13-SNAPSHOT-317.jar -o run/mods/CustomSkinLoader_ForgeLegacy-14.13-SNAPSHOT-317.jar
 
 SKINS_DIR=$SCRIPT_DIR/data/minecraft/skins
 MOD_SKINS_DIR=run/CustomSkinLoader/LocalSkin/skins
