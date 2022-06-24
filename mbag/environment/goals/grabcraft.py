@@ -404,7 +404,7 @@ class SingleWallGrabcraftGenerator(GrabcraftGoalGenerator):
     default_config: SingleWallGrabcraftGoalConfig = {
         "data_dir": GrabcraftGoalGenerator.default_config["data_dir"],
         "subset": GrabcraftGoalGenerator.default_config["subset"],
-        "force_single_cc": True,
+        "force_single_cc": GrabcraftGoalGenerator.default_config["force_single_cc"],
         "use_limited_block_set": GrabcraftGoalGenerator.default_config[
             "use_limited_block_set"
         ],
