@@ -208,7 +208,7 @@ def make_mbag_sacred_config(ex: Experiment):  # noqa
                 "num_value_layers": num_value_layers,
             }
             model_config["custom_model_config"] = conv_config
-        elif model == "transformer":
+        elif model in ["transformer", "action_gate_transformer"]:
             transformer_config: MbagTransformerModelConfig = {
                 "embedding_size": embedding_size,
                 "use_extra_features": use_extra_features,

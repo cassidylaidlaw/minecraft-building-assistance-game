@@ -17,6 +17,7 @@ from mbag.environment.types import (
     GOAL_BLOCKS,
     PLAYER_LOCATIONS,
     LAST_INTERACTED,
+    MbagAction,
     MbagWorldObsArray,
 )
 
@@ -893,5 +894,26 @@ class MbagTransformerModel(MbagTorchModel):
     def _get_head_in_channels(self) -> int:
         return self.hidden_size
 
+class MbagActionGateModel():
+    def __init__(self):
+        super().__init__()
+
+        self.action_gate_head = self._construct_action_gate_head()
+
+    def forward(self, input_dict, state, seq_lens):
+        logits, _ = super.forward(input_dict, state, seq_lens)
+        logits = logits.detach()
+
+        action_gate_logit = self.action_gate(self._backbone_out.detach())
+        action_gate_prob = F.sigmoid(action_gate_logit)
+
+        # We add value to the logit that represents NOOP such that is x is action_gate_prob,
+        # then x percent of the time the agent executes a NOOP and the rest of the time the agent
+        # executes the same action is would have otherwise executed. 
+        additional_noop_logit = action_gate_logit * torch.log(torch.exp(logits).sum())# need to figure out which part of the tensor to sum
+
+class MbagActionGateTransformerModel(MbagActionGateModel, MbagTransformerModel): pass
+
+ModelCatalog.register_custom_model("mbag_action_gate_transformer_model", MbagActionGateTransformerModel)
 
 ModelCatalog.register_custom_model("mbag_transformer_model", MbagTransformerModel)

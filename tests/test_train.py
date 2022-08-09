@@ -53,7 +53,6 @@ def test_single_agent(default_config):
 
     assert result["custom_metrics"]["ppo/own_reward_mean"] > -10
 
-
 @pytest.mark.uses_rllib
 def test_transformer(default_config):
     result = ex.run(
@@ -152,5 +151,22 @@ def test_train_together(default_config):
             "policies_to_train": ["ppo_0", "ppo_1"],
         }
     ).result
+    assert result["custom_metrics"]["ppo_0/own_reward_mean"] > -10
+    assert result["custom_metrics"]["ppo_1/own_reward_mean"] > -10
+
+@pytest.mark.uses_rllib
+def test_action_gate(default_config):
+    result = ex.run(
+        config_updates={
+            **default_config,
+            "model": "action_gate_transformer",
+            "position_embedding_size": 6,
+            "hidden_size": 39,
+            "num_layers": 3,
+            "num_heads": 1,
+            "use_separated_transformer": True,
+        }
+    ).result
+
     assert result["custom_metrics"]["ppo_0/own_reward_mean"] > -10
     assert result["custom_metrics"]["ppo_1/own_reward_mean"] > -10
