@@ -18,7 +18,7 @@ def default_config():
         "kl_target": 0.01,
         "horizon": 10,
         "num_workers": 10,
-        "goal_generator": "single_wall_grabcraft",
+        "goal_generator": "random",
         "use_extra_features": True,
         "num_training_iters": 2,
         "train_batch_size": 50,
@@ -27,19 +27,19 @@ def default_config():
     }
 
 
-# This runs once before the tests run.
-@pytest.fixture(scope="session", autouse=True)
-def setup(default_config):
-    # Execute short dummy run and return the file where the checkpoint is stored.
-    checkpoint_dir = tempfile.mkdtemp()
-    ex.run(config_updates={**default_config, "log_dir": checkpoint_dir})
+# # This runs once before the tests run.
+# @pytest.fixture(scope="session", autouse=True)
+# def setup(default_config):
+#     # Execute short dummy run and return the file where the checkpoint is stored.
+#     checkpoint_dir = tempfile.mkdtemp()
+#     ex.run(config_updates={**default_config, "log_dir": checkpoint_dir})
 
-    global dummy_run
-    dummy_run = glob.glob(
-        checkpoint_dir
-        + "/MbagPPO/self_play/6x6x6/single_wall_grabcraft/*/checkpoint_000002/checkpoint-2"
-    )[0]
-    assert os.path.exists(dummy_run)
+#     global dummy_run
+#     dummy_run = glob.glob(
+#         checkpoint_dir
+#         + "/MbagPPO/self_play/6x6x6/single_wall_grabcraft/*/checkpoint_000002/checkpoint-2"
+#     )[0]
+#     assert os.path.exists(dummy_run)
 
 
 @pytest.mark.uses_rllib
