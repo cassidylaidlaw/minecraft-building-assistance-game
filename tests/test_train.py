@@ -27,19 +27,19 @@ def default_config():
     }
 
 
-# # This runs once before the tests run.
-# @pytest.fixture(scope="session", autouse=True)
-# def setup(default_config):
-#     # Execute short dummy run and return the file where the checkpoint is stored.
-#     checkpoint_dir = tempfile.mkdtemp()
-#     ex.run(config_updates={**default_config, "log_dir": checkpoint_dir})
+# This runs once beore the tests run.
+@pytest.fixture(scope="session", autouse=True)
+def setup(default_config):
+    # Execute short dummy run and return the file where the checkpoint is stored.
+    checkpoint_dir = tempfile.mkdtemp()
+    ex.run(config_updates={**default_config, "log_dir": checkpoint_dir})
 
-#     global dummy_run
-#     dummy_run = glob.glob(
-#         checkpoint_dir
-#         + "/MbagPPO/self_play/6x6x6/single_wall_grabcraft/*/checkpoint_000002/checkpoint-2"
-#     )[0]
-#     assert os.path.exists(dummy_run)
+    global dummy_run
+    dummy_run = glob.glob(
+        checkpoint_dir
+        + "/MbagPPO/self_play/6x6x6/random/*/checkpoint_000002/checkpoint-2"
+    )[0]
+    assert os.path.exists(dummy_run)
 
 
 @pytest.mark.uses_rllib
@@ -52,6 +52,7 @@ def test_single_agent(default_config):
     ).result
 
     assert result["custom_metrics"]["ppo/own_reward_mean"] > -10
+
 
 @pytest.mark.uses_rllib
 def test_transformer(default_config):
@@ -154,6 +155,7 @@ def test_train_together(default_config):
     assert result["custom_metrics"]["ppo_0/own_reward_mean"] > -10
     assert result["custom_metrics"]["ppo_1/own_reward_mean"] > -10
 
+
 @pytest.mark.uses_rllib
 def test_action_gate(default_config):
     result = ex.run(
@@ -168,5 +170,4 @@ def test_action_gate(default_config):
         }
     ).result
 
-    assert result["custom_metrics"]["ppo_0/own_reward_mean"] > -10
-    assert result["custom_metrics"]["ppo_1/own_reward_mean"] > -10
+    assert result["custom_metrics"]["ppo/own_reward_mean"] > -10

@@ -157,7 +157,7 @@ DEFAULT_CONFIG: MbagConfigDict = {
     "goal_generator_config": {
         "goal_generator": "random",
         "goal_generator_config": {},
-        "transforms": [
+        "goal_transforms": [
             {"transform": "add_grass"},
         ],
     },

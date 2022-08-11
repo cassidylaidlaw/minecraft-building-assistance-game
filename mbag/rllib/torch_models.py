@@ -1,3 +1,4 @@
+from functools import reduce
 from typing import Dict, List, Tuple, cast
 import warnings
 import torch
@@ -894,26 +895,84 @@ class MbagTransformerModel(MbagTorchModel):
     def _get_head_in_channels(self) -> int:
         return self.hidden_size
 
-class MbagActionGateModel():
-    def __init__(self):
-        super().__init__()
+
+ModelCatalog.register_custom_model("mbag_transformer_model", MbagTransformerModel)
+
+
+class MbagActionGateModel:
+    def __init__(
+        self,
+        obs_space: spaces.Space,
+        action_space: spaces.Space,
+        num_outputs: int,
+        model_config,
+        name,
+        **kwargs,
+    ):
+        super().__init__(
+            obs_space, action_space, num_outputs, model_config, name, **kwargs
+        )
 
         self.action_gate_head = self._construct_action_gate_head()
 
+    def action_gate_function(self):
+        return self.action_gate_head(self._backbone_out)
+
+    def _construct_action_gate_head(self) -> nn.Module:
+        """
+        Construct a head that gives the logit
+        """
+        num_world_blocks = reduce(lambda x, y: x * y, self.world_size)
+
+        # Not sure if this is expressive enough
+        return nn.Sequential(
+            nn.Conv3d(self._get_head_in_channels(), 1, 1),
+            nn.Flatten(),
+            nn.LeakyReLU(),
+            nn.Linear(num_world_blocks, 1),
+        )
+
+    def _reshape_logits(self, logits):
+        """
+        Reshape the logits into the shape (batch_size, N, (world_size))
+        where N = num_action_types + num_block_types.
+        """
+        batch_size = logits.size()[0]
+
+        return logits.reshape((batch_size, -1) + self.world_size)
+
     def forward(self, input_dict, state, seq_lens):
-        logits, _ = super.forward(input_dict, state, seq_lens)
+        logits, state = super().forward(input_dict, state, seq_lens)
+
+        # Auxilary heads use _backbone_out, apply .detach() to it so that gradients
+        # don't flow through the backbone and do the same for logits.
+        self._backbone_out = self._backbone_out.detach()
         logits = logits.detach()
+        logits_reshaped = self._reshape_logits(logits)
+        action_gate_logit = self.action_gate_function()
 
-        action_gate_logit = self.action_gate(self._backbone_out.detach())
-        action_gate_prob = F.sigmoid(action_gate_logit)
+        # We add value to the logit that represents NOOP actions such that if
+        # x == sigmoid(action_gate_logit),then x of the time the agent executes
+        # a NOOP and the rest of the time the agent executes the same action is would
+        # have otherwise executed. We do so by adding a value y to the NOOP logits such
+        # that softmax(y) = x == sigmoid(action_gate_logit).
+        action_location_logits = logits_reshaped[
+            :, : MbagAction.NUM_ACTION_TYPES
+        ].flatten(start_dim=1)
 
-        # We add value to the logit that represents NOOP such that is x is action_gate_prob,
-        # then x percent of the time the agent executes a NOOP and the rest of the time the agent
-        # executes the same action is would have otherwise executed. 
-        additional_noop_logit = action_gate_logit * torch.log(torch.exp(logits).sum())# need to figure out which part of the tensor to sum
+        additional_noop_logit = action_gate_logit + torch.logsumexp(
+            action_location_logits, 1, True
+        )
 
-class MbagActionGateTransformerModel(MbagActionGateModel, MbagTransformerModel): pass
+        logits_reshaped[:, MbagAction.NOOP] += additional_noop_logit.view(-1, 1, 1, 1)
 
-ModelCatalog.register_custom_model("mbag_action_gate_transformer_model", MbagActionGateTransformerModel)
+        return logits_reshaped.flatten(start_dim=1), state
 
-ModelCatalog.register_custom_model("mbag_transformer_model", MbagTransformerModel)
+
+class MbagActionGateTransformerModel(MbagActionGateModel, MbagTransformerModel):
+    pass
+
+
+ModelCatalog.register_custom_model(
+    "mbag_action_gate_transformer_model", MbagActionGateTransformerModel
+)
