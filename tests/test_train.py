@@ -30,19 +30,19 @@ def default_config():
     }
 
 
-# # This runs once beore the tests run.
-# @pytest.fixture(scope="session", autouse=True)
-# def setup(default_config):
-#     # Execute short dummy run and return the file where the checkpoint is stored.
-#     checkpoint_dir = tempfile.mkdtemp()
-#     ex.run(config_updates={**default_config, "log_dir": checkpoint_dir})
+# This runs once beore the tests run.
+@pytest.fixture(scope="session", autouse=True)
+def setup(default_config):
+    # Execute short dummy run and return the file where the checkpoint is stored.
+    checkpoint_dir = tempfile.mkdtemp()
+    ex.run(config_updates={**default_config, "log_dir": checkpoint_dir})
 
-#     global dummy_run
-#     dummy_run = glob.glob(
-#         checkpoint_dir
-#         + "/MbagPPO/self_play/6x6x6/random/*/checkpoint_000002/checkpoint-2"
-#     )[0]
-#     assert os.path.exists(dummy_run)
+    global dummy_run
+    dummy_run = glob.glob(
+        checkpoint_dir
+        + "/MbagPPO/self_play/6x6x6/random/*/checkpoint_000002/checkpoint-2"
+    )[0]
+    assert os.path.exists(dummy_run)
 
 
 @pytest.mark.uses_rllib

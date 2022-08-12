@@ -100,11 +100,6 @@ def main(
             }
         )
         config_updates["evaluation_num_workers"] = 1
-    print(checkpoint)
-    print(run)
-    print(config_updates)
-    import sys
-    sys.exit()
     trainer = load_trainer(checkpoint, run, config_updates)
     evaluation_workers: Optional[WorkerSet] = trainer.evaluation_workers
     assert evaluation_workers is not None
