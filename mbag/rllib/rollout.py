@@ -100,7 +100,6 @@ def main(
             }
         )
         config_updates["evaluation_num_workers"] = 1
-
     trainer = load_trainer(checkpoint, run, config_updates)
     evaluation_workers: Optional[WorkerSet] = trainer.evaluation_workers
     assert evaluation_workers is not None
