@@ -1169,7 +1169,7 @@ class MbagEnv(object):
 
         for time, snapshot in reversed(historical_player_state):
             if (
-                self.player_block_looking[player_index]
+                self.player_block_breaking[player_index]
                 and self.player_block_looking[player_index] in location_discrepancies
             ):
                 print("Breaking", self.player_block_looking[player_index])
@@ -1187,17 +1187,13 @@ class MbagEnv(object):
                 )
                 location_discrepancies.remove(self.player_block_looking[player_index])
 
-            if "LineOfSight" not in snapshot or not snapshot["LineOfSight"]["inRange"]:
-                continue
-
-            # print(snapshot["LineOfSight"])
-
-            block_location = (
-                int(snapshot["LineOfSight"]["x"]),
-                int(snapshot["LineOfSight"]["y"]),
-                int(snapshot["LineOfSight"]["z"]),
-            )
-            self.player_block_looking[player_index] = block_location
+            if "LineOfSight" in snapshot and snapshot["LineOfSight"]["inRange"]:
+                block_location = (
+                    int(snapshot["LineOfSight"]["x"]),
+                    int(snapshot["LineOfSight"]["y"]),
+                    int(snapshot["LineOfSight"]["z"]),
+                )
+                self.player_block_looking[player_index] = block_location
 
             for event in snapshot.get("events", []):
                 if (
