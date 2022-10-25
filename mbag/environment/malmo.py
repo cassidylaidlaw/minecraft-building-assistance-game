@@ -6,7 +6,8 @@ from datetime import datetime
 import shutil
 import tarfile
 import tempfile
-from typing import List, Optional, Tuple, TypedDict, cast
+from typing import List, Optional, Tuple, TypedDict
+from typing_extensions import Literal
 import MalmoPython
 import logging
 import time
@@ -23,13 +24,27 @@ from .mbag_env import MbagConfigDict
 logger = logging.getLogger(__name__)
 
 
+class MalmoEvent(TypedDict, total=False):
+    command: str
+    pressed: bool
+
+
+class MalmoRayObservation(TypedDict):
+    hitType: Literal["block", "entity", "item"]  # noqa: N815
+    x: float
+    y: float
+    z: float
+    inRange: bool  # noqa: N815
+
+
 class MalmoObservationDict(TypedDict, total=False):
     world: List[str]
     goal: List[str]
     XPos: float
     YPos: float
     ZPos: float
-    events: List
+    events: List[MalmoEvent]
+    LineOfSight: MalmoRayObservation
 
 
 class MalmoClient(object):
