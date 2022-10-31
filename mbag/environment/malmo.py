@@ -6,7 +6,7 @@ from datetime import datetime
 import shutil
 import tarfile
 import tempfile
-from typing import List, Optional, Tuple, TypedDict, cast
+from typing import List, Optional, Tuple, TypedDict
 import MalmoPython
 import logging
 import time

@@ -1,5 +1,3 @@
-import json
-from math import floor
 from typing import (
     Dict,
     List,
@@ -233,8 +231,6 @@ class MbagStateDict(TypedDict):
     player_locations: List[WorldLocation]
     player_directions: List[FacingDirection]
     player_inventories: List[MbagInventory]
-    player_block_looking: List[WorldLocation]
-    player_bock_breaking: List[WorldLocation]
     last_interacted: np.ndarray
     timestep: int
 
@@ -448,7 +444,6 @@ class MbagEnv(object):
         if self.config["malmo"]["use_malmo"]:
             time.sleep(self.malmo_client.ACTION_DELAY)
             infos = self._update_state_from_malmo(infos)
-            # print(infos)
         obs = [
             self._get_player_obs(player_index)
             for player_index in range(self.config["num_players"])
@@ -1121,8 +1116,8 @@ class MbagEnv(object):
             round(malmo_player_state.get("ZPos", env_location[2])),
         )
 
-        print("env location", env_location)
-        print("malmo location", malmo_location)
+        logger.info(f"Player location in env: {env_location}")
+        logger.info(f"Player location in Malmo: {malmo_location}")
         # print("observations")
         # print(malmo_player_state.get("events", []))
         # print("history")
@@ -1131,6 +1126,10 @@ class MbagEnv(object):
         if env_location[0] != malmo_location[0]:  # floor
             diff = int(abs(env_location[0] - malmo_location[0]))
             for _ in range(diff):
+                if env_location[0] > malmo_location[0]:
+                    logger.info("Moved negative X")
+                else:
+                    logger.info("Moved positive X")
                 actions_queue.append(
                     (
                         MbagAction.MOVE_NEG_X
@@ -1143,6 +1142,10 @@ class MbagEnv(object):
         if env_location[1] != malmo_location[1]:
             diff = int(abs(env_location[1] - malmo_location[1]))
             for _ in range(diff):
+                if env_location[1] > malmo_location[1]:
+                    logger.info("Moved negative Y")
+                else:
+                    logger.info("Moved positive Y")
                 actions_queue.append(
                     (
                         MbagAction.MOVE_NEG_Y
@@ -1155,6 +1158,10 @@ class MbagEnv(object):
         if env_location[2] != malmo_location[2]:
             diff = int(abs(env_location[2] - malmo_location[2]))
             for _ in range(diff):
+                if env_location[2] > malmo_location[2]:
+                    logger.info("Moved negative Z")
+                else:
+                    logger.info("Moved positive Z")
                 actions_queue.append(
                     (
                         MbagAction.MOVE_NEG_Z
@@ -1167,12 +1174,14 @@ class MbagEnv(object):
 
         # This is only for using
 
-        for time, snapshot in reversed(historical_player_state):
+        for _, snapshot in reversed(historical_player_state):
             if (
                 self.player_block_breaking[player_index]
                 and self.player_block_looking[player_index] in location_discrepancies
             ):
-                print("Breaking", self.player_block_looking[player_index])
+                logger.info(
+                    f"Breaking block at {self.player_block_looking[player_index]}"
+                )
                 actions_queue.append(
                     (
                         MbagAction.BREAK_BLOCK,
@@ -1203,7 +1212,7 @@ class MbagEnv(object):
                 ):
                     continue
 
-                print(event)
+                # logger.info(f"Processing event {event}")
 
                 if event["command"] == "use":
                     actions_queue.append(
@@ -1217,7 +1226,7 @@ class MbagEnv(object):
                             ),
                             self.current_blocks.blocks[block_location],
                         )
-                    ),
+                    )
                 else:
                     if event["pressed"]:
                         self.player_block_breaking[
@@ -1239,7 +1248,7 @@ class MbagEnv(object):
 
                         self.player_block_breaking[player_index] = None
 
-        print(actions_queue)
+        # print(actions_queue)
         return None
 
     def _update_state_from_malmo(self, infos):
