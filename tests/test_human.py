@@ -11,7 +11,6 @@ logger = logging.getLogger(__name__)
 
 
 @pytest.mark.uses_malmo
-@pytest.mark.timeout(3600)
 def test_human_in_malmo():
     """
     Make sure the inventory agent can place blocks
@@ -21,7 +20,7 @@ def test_human_in_malmo():
         {
             "world_size": (5, 6, 5),
             "num_players": 1,
-            "horizon": 1000,
+            "horizon": 25,
             "goal_generator": BasicGoalGenerator,
             "goal_generator_config": {"pallette": True},
             "malmo": {
