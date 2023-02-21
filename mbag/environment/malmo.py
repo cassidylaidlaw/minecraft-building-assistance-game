@@ -90,93 +90,79 @@ class MalmoClient(object):
                 )
         inventory_items_xml = "\n".join(inventory_item_tags)
 
-        if env_config["players"][player_index]["is_human"]:
-            return f"""
-            <AgentSection mode="Creative">
-                <Name>{self.get_player_name(player_index, env_config)}</Name>
-                <AgentStart>
-                    <Placement x="{0.5 + player_index}" y="2" z="0.5" yaw="270"/>
-                    <Inventory>
-                        {inventory_items_xml}
-                    </Inventory>
-                </AgentStart>
-                <AgentHandlers>
-                    <ObservationFromGrid>
-                        <Grid name="world" absoluteCoords="true">
-                            <min x="0" y="0" z="0" />
-                            <max x="{width - 1}" y="{height - 1}" z="{depth - 1}" />
-                        </Grid>
-                        <Grid name="goal" absoluteCoords="true">
-                            <min x="{width + 1}" y="0" z="0" />
-                            <max x="{width * 2}" y="{height - 1}" z="{depth - 1}" />
-                        </Grid>
-                    </ObservationFromGrid>
-                    <ObservationFromFullInventory />
-                    <ObservationFromFullStats />
+        command_handlers = """
+        <AbsoluteMovementCommands />
+        <DiscreteMovementCommands>
+            <ModifierList type="deny-list">
+                <command>jump</command>
+            </ModifierList>
+        </DiscreteMovementCommands>
+        <InventoryCommands />
+        <HumanLevelCommands>
+            <ModifierList type="allow-list">
+                <command>jump</command>
+            </ModifierList>
+        </HumanLevelCommands>
+        <ChatCommands />
+        <MissionQuitCommands />
+        """
 
-                    <ObservationFromChat />
-                    <ObservationFromRecentCommands />
-                    <ObservationFromRay />
+        observation_handlers = f"""
+        <ObservationFromGrid>
+            <Grid name="world" absoluteCoords="true">
+                <min x="0" y="0" z="0" />
+                <max x="{width - 1}" y="{height - 1}" z="{depth - 1}" />
+            </Grid>
+            <Grid name="goal" absoluteCoords="true">
+                <min x="{width + 1}" y="0" z="0" />
+                <max x="{width * 2}" y="{height - 1}" z="{depth - 1}" />
+            </Grid>
+        </ObservationFromGrid>
+        <ObservationFromFullInventory />
+        <ObservationFromFullStats />
+        """
 
-                    <ObservationFromHuman />
-                    <ObservationFromSystem />
-                    <AbsoluteMovementCommands />
-                    <DiscreteMovementCommands>
-                        <ModifierList type="deny-list">
-                            <command>jump</command>
-                        </ModifierList>
-                    </DiscreteMovementCommands>
-                    <InventoryCommands />
-                    <HumanLevelCommands>
-                        <ModifierList type="allow-list">
-                            <command>jump</command>
-                        </ModifierList>
-                    </HumanLevelCommands>
-                    <ChatCommands />
-                    <MissionQuitCommands />
-                </AgentHandlers>
-            </AgentSection>
+        player_config = env_config["players"][player_index]
+
+        if player_config["is_human"]:
+            observation_handlers += f"""
+            <ObservationFromChat />
+            <ObservationFromRecentCommands />
+            <ObservationFromRay />
+            <ObservationFromHuman />
+            <ObservationFromSystem />
             """
-        else:
-            return f"""
-            <AgentSection mode="Creative">
-                <Name>{self.get_player_name(player_index, env_config)}</Name>
-                <AgentStart>
-                    <Placement x="{0.5 + player_index}" y="2" z="0.5" yaw="270"/>
-                    <Inventory>
-                        {inventory_items_xml}
-                    </Inventory>
-                </AgentStart>
-                <AgentHandlers>
-                    <ObservationFromGrid>
-                        <Grid name="world" absoluteCoords="true">
-                            <min x="0" y="0" z="0" />
-                            <max x="{width - 1}" y="{height - 1}" z="{depth - 1}" />
-                        </Grid>
-                        <Grid name="goal" absoluteCoords="true">
-                            <min x="{width + 1}" y="0" z="0" />
-                            <max x="{width * 2}" y="{height - 1}" z="{depth - 1}" />
-                        </Grid>
-                    </ObservationFromGrid>
-                    <ObservationFromFullInventory />
-                    <ObservationFromFullStats />
-                    <AbsoluteMovementCommands />
-                    <DiscreteMovementCommands>
-                        <ModifierList type="deny-list">
-                            <command>jump</command>
-                        </ModifierList>
-                    </DiscreteMovementCommands>
-                    <InventoryCommands />
-                    <HumanLevelCommands>
-                        <ModifierList type="allow-list">
-                            <command>jump</command>
-                        </ModifierList>
-                    </HumanLevelCommands>
-                    <ChatCommands />
-                    <MissionQuitCommands />
-                </AgentHandlers>
-            </AgentSection>
+        
+        if player_config["is_minerl_agent"]:
+            observation_handlers = """
+            <VideoProducer want_depth="false">
+                <Width>640</Width>
+                <Height>360</Height>
+            </VideoProducer>
+            <ObservationFromFullInventory flat="false"/>
+            <ObservationFromFullStats />
             """
+            command_handlers = """
+            <HumanLevelCommands />
+            <AbsoluteMovementCommands />
+            <ChatCommands />
+            """
+
+        return f"""
+        <AgentSection mode="Creative">
+            <Name>{self.get_player_name(player_index, env_config)}</Name>
+            <AgentStart>
+                <!-- <Placement x="{0.5 + player_index}" y="2" z="0.5" yaw="270"/> -->
+                <Inventory>
+                    {inventory_items_xml}
+                </Inventory>
+            </AgentStart>
+            <AgentHandlers>
+                {observation_handlers}
+                {command_handlers}
+            </AgentHandlers>
+        </AgentSection>
+        """
 
     def _get_spectator_position(self, env_config: "MbagConfigDict") -> BlockLocation:
         width, height, depth = env_config["world_size"]
@@ -290,6 +276,32 @@ class MalmoClient(object):
         if env_config["malmo"]["use_spectator"]:
             agent_section_xmls.append(self._get_spectator_agent_section_xml(env_config))
         agent_sections_xml = "\n".join(agent_section_xmls)
+
+        return f"""
+        <?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+        <Mission xmlns="http://ProjectMalmo.microsoft.com" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+
+            <About>
+                <Summary>test</Summary>
+            </About>
+
+            <ServerSection>
+                <ServerInitialConditions>
+                    <Time>
+                        <StartTime>1000</StartTime>
+                        <AllowPassageOfTime>false</AllowPassageOfTime>
+                    </Time>
+                    <Weather>clear</Weather>
+                    <AllowSpawning>false</AllowSpawning>
+                </ServerInitialConditions>
+                <ServerHandlers>
+                    <DefaultWorldGenerator />
+                </ServerHandlers>
+            </ServerSection>
+
+            {agent_sections_xml}
+        </Mission>
+        """
 
         return f"""
         <?xml version="1.0" encoding="UTF-8" standalone="no" ?>

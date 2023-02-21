@@ -185,6 +185,12 @@ class MbagPlayerConfigDict(TypedDict, total=False):
     Malmo to be configured.
     """
 
+    is_minerl_agent: bool
+    """
+    Whether this player is a MineRL agent (e.g., a VPT model). These need to be treated
+    specially in Malmo in order to get the correct observations.
+    """
+
     timestep_skip: int
     """
     How often the player can interact with the environment, i.e. 1 means every
@@ -234,6 +240,7 @@ DEFAULT_PLAYER_CONFIG: MbagPlayerConfigDict = {
     "player_name": None,
     "goal_visible": True,
     "is_human": False,
+    "is_minerl_agent": False,
     "timestep_skip": 1,
     "rewards": {},
     "give_items": [],
@@ -459,7 +466,7 @@ class MbagEnv(object):
             time.sleep(1)  # Wait a second for the environment to load.
 
             # Pre-episode setup in Malmo.
-            for player_index in range(self.config["num_players"]):
+            for player_index in range(0):  # range(self.config["num_players"]):
                 # Make players fly.
                 for _ in range(2):
                     self.malmo_client.send_command(player_index, "jump 1")
