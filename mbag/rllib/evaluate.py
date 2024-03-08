@@ -97,11 +97,11 @@ def main(
     os.makedirs(out_dir, exist_ok=True)
 
     # Try to load env config from the first checkpoint.
-    env_config: Optional[MbagConfigDict] = None
+    env_config: Optional[MbagConfigDict] = {}
     for checkpoint in checkpoints:
         if checkpoint is not None:
             config = load_trainer_config(checkpoint)
-            if env_config is None:
+            if env_config == {}:
                 env_config = copy.deepcopy(config["env_config"])
     assert env_config is not None
 
