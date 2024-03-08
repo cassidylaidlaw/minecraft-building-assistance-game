@@ -114,7 +114,6 @@ class MbagEnv(object):
 
         if self.config["malmo"]["use_malmo"]:
             self.malmo_interface = MalmoInterface(self.config)
-            self.malmo_client = self.malmo_interface.get_malmo_client()
 
         self.global_timestep = 0
 
@@ -332,7 +331,10 @@ class MbagEnv(object):
                 for player_index, action_tuple in human_actions:
                     self.human_action_queues[player_index].append(action_tuple)
                 for player_index, action_queue in enumerate(self.human_action_queues):
-                    if len(action_queue) > 0:
+                    if (
+                        len(action_queue) > 0
+                        and self.config["players"][player_index]["is_human"]
+                    ):
                         any_human_actions = True
                 if any_human_actions:
                     break
@@ -347,8 +349,12 @@ class MbagEnv(object):
                     human_action_tuple[0] != MbagAction.NOOP
                     and not self.config["players"][player_index]["is_human"]
                 ):
+                    human_action = MbagAction(
+                        human_action_tuple, self.config["world_size"]
+                    )
                     logger.warning(
-                        f"received human action for non-human player {player_index}"
+                        f"received human action for non-human player {player_index}: "
+                        f"{human_action}"
                     )
 
             if not any_human_actions and not self.malmo_interface.running_ai_actions():
@@ -544,6 +550,7 @@ class MbagEnv(object):
                 cast(Literal[1, 2], action.action_type),
                 action.block_location,
                 action.block_id,
+                random_seed=self.timestep,
             )
         else:
             if self._collides_with_players(
@@ -559,6 +566,7 @@ class MbagEnv(object):
                     other_player_locations=self.player_locations[:player_index]
                     + self.player_locations[player_index + 1 :],
                     is_human=self.config["players"][player_index]["is_human"],
+                    random_seed=self.timestep,
                 )
 
         if place_break_result is None:
@@ -899,10 +907,7 @@ class MbagEnv(object):
         # Add locations to the observation if the locations are actually meaningful
         # (i.e., if players do not have teleportation abilities).
         if not self.config["abilities"]["teleportation"]:
-            check_for_overlap = not any(
-                self.config["players"][other_player_index]["is_human"]
-                for other_player_index in range(self.config["num_players"])
-            )
+            check_for_overlap = not self.config["malmo"]["use_malmo"]
 
             for other_player_index, other_player_location in enumerate(
                 self.player_locations

@@ -379,6 +379,7 @@ class MinecraftBlocks(object):
         other_player_locations: List[WorldLocation] = [],
         update_blocks: bool = True,
         is_human: bool = False,
+        random_seed: int = 0,
     ) -> Optional[Tuple[WorldLocation, WorldLocation]]:
         """
         Try to place or break a block (depending on action_type) at the given
@@ -386,6 +387,10 @@ class MinecraftBlocks(object):
         player location that is empty and where the block can be placed/broken from.
         If the block can be placed or broken, then returns a tuple with the successful
         player location and click location, and updates the blocks accordingly.
+
+        This function is deterministic according to the current blocks and the given
+        random_seed. To randomize the choice of viewpoint/click location, set
+        random_seed to a non-zero value.
         """
 
         if is_human:
@@ -438,7 +443,7 @@ class MinecraftBlocks(object):
 
         # Make choice of viewpoint/click location deterministic by seeding with the
         # current blocks.
-        random = Random(hash(self.blocks.data.tobytes()))
+        random = Random(hash((self.blocks.data.tobytes(), random_seed)))
         viewpoint, click_location = random.choice(
             cast(Sequence[Tuple[np.ndarray, np.ndarray]], viewpoint_click_candidates)
         )

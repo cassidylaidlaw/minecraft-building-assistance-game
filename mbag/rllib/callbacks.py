@@ -81,11 +81,13 @@ class MbagCallbacks(AlphaZeroDefaultCallbacks):
                     f"{policy_id}/num_correct_{action_type_name.lower()}", 0
                 )
 
-            episode.custom_metrics.setdefault(f"{policy_id}/num_unintentional_noop", 0)
-            episode.custom_metrics.setdefault(f"{policy_id}/own_reward", 0)
-            episode.custom_metrics.setdefault(
-                f"{policy_id}/num_{MBAG_ACTION_BREAK_PALETTE_NAME}", 0
-            )
+        episode.custom_metrics.setdefault(f"{policy_id}/num_unintentional_noop", 0)
+        episode.custom_metrics.setdefault(f"{policy_id}/own_reward", 0)
+        episode.custom_metrics.setdefault(f"{policy_id}/goal_dependent_reward", 0)
+        episode.custom_metrics.setdefault(f"{policy_id}/goal_independent_reward", 0)
+        episode.custom_metrics.setdefault(
+            f"{policy_id}/num_{MBAG_ACTION_BREAK_PALETTE_NAME}", 0
+        )
 
     def on_episode_step(
         self,
@@ -107,8 +109,14 @@ class MbagCallbacks(AlphaZeroDefaultCallbacks):
             policy_id = worker.policy_mapping_fn(agent_id, episode, worker)
             self._initialize_episode_metrics_if_necessary(episode, policy_id)
 
-            info_dict = self._get_last_info(episode, agent_id)
+            info_dict = cast(MbagInfoDict, self._get_last_info(episode, agent_id))
             episode.custom_metrics[f"{policy_id}/own_reward"] += info_dict["own_reward"]
+            episode.custom_metrics[f"{policy_id}/goal_dependent_reward"] += info_dict[
+                "goal_dependent_reward"
+            ]
+            episode.custom_metrics[f"{policy_id}/goal_independent_reward"] += info_dict[
+                "goal_independent_reward"
+            ]
 
             # Log what action the agent made
             action = info_dict["action"]

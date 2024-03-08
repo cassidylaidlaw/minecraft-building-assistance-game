@@ -18,7 +18,12 @@ from sacred import SETTINGS, Experiment
 from mbag.agents.human_agent import HumanAgent
 from mbag.environment.config import DEFAULT_HUMAN_GIVE_ITEMS, merge_configs
 from mbag.environment.mbag_env import MbagConfigDict
-from mbag.evaluation.evaluator import EpisodeInfo, MbagAgentConfig, MbagEvaluator
+from mbag.evaluation.evaluator import (
+    EpisodeInfo,
+    EpisodeInfoJSONEncoder,
+    MbagAgentConfig,
+    MbagEvaluator,
+)
 
 from .agents import RllibAlphaZeroAgent, RllibMbagAgent
 from .os_utils import available_cpu_count
@@ -50,7 +55,7 @@ def sacred_config():
 
 
 @ex.automain
-def main(
+def main(  # noqa: C901
     runs: List[str],
     checkpoints: List[Optional[str]],
     policy_ids: List[Optional[PolicyID]],
@@ -76,6 +81,8 @@ def main(
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+
+    env_config_updates.setdefault("randomize_first_episode_length", False)
 
     algorithm_config_updates.setdefault("num_workers", 0)
     algorithm_config_updates.setdefault("num_envs_per_worker", 1)
@@ -164,18 +171,32 @@ def main(
     )
 
     episode_infos: List[EpisodeInfo] = []
-    for _ in tqdm.trange(episodes):
-        episode_infos.append(evaluator.rollout())
+    with tqdm.trange(episodes) as progress_bar:
+        for _ in progress_bar:
+            episode_infos.append(evaluator.rollout())
+            mean_reward = np.mean(
+                [episode_info.cumulative_reward for episode_info in episode_infos]
+            )
+            mean_goal_similarity = np.mean(
+                [
+                    episode_info.last_infos[0]["goal_similarity"]
+                    for episode_info in episode_infos
+                ]
+            )
+            progress_bar.set_postfix(
+                mean_reward=mean_reward, mean_goal_similarity=mean_goal_similarity
+            )
 
     out_pickle_fname = os.path.join(out_dir, "episode_info.pickle")
     _log.info(f"saving full results to {out_pickle_fname}")
     with open(out_pickle_fname, "wb") as out_pickle:
         pickle.dump(episode_infos, out_pickle)
 
-    out_json_fname = os.path.join(out_dir, "episode_info.json")
+    out_json_fname = os.path.join(out_dir, "episode_info.jsonl")
     _log.info(f"saving JSON results to {out_json_fname}")
     with open(out_json_fname, "w") as out_json:
-        json.dump([episode_info.to_json() for episode_info in episode_infos], out_json)
+        for episode_info in episode_infos:
+            json.dump(episode_info.to_json(), out_json, cls=EpisodeInfoJSONEncoder)
 
     for trainer in trainers:
         trainer.stop()

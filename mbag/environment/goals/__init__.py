@@ -21,6 +21,7 @@ from .transforms import (
     LargestConnectedComponentTransform,
     MirrorTransform,
     RandomlyPlaceTransform,
+    RemoveInvisibleNonDirtTransform,
     SeamCarvingTransform,
     UniformBlockTypeTransform,
 )
@@ -41,6 +42,7 @@ ALL_GOAL_TRANSFORMS: Dict[str, Type[GoalTransform]] = {
     "min_size_filter": MinSizeFilter,
     "randomly_place": RandomlyPlaceTransform,
     "add_grass": AddGrassTransform,
+    "remove_invisible_non_dirt": RemoveInvisibleNonDirtTransform,
     "largest_cc": LargestConnectedComponentTransform,
     "crop_air": CropAirTransform,
     "crop": CropTransform,

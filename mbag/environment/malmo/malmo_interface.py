@@ -282,13 +282,6 @@ class MalmoInterface:
         else:
             self._palette_x = self._env_config["world_size"][0] - 1
 
-    def get_malmo_client(self):
-        """
-        Dummy method to expose underlying malmo_client API
-        TODO: delete after migration is complete
-        """
-        return self._malmo_client
-
     def get_malmo_state(self):
         with self._malmo_state_lock:
             return self._malmo_state
@@ -319,6 +312,7 @@ class MalmoInterface:
                     player_index,
                     "tp " + " ".join(map(str, player_locations[player_index])),
                 )
+                time.sleep(0.1)
 
                 # Give items to players.
                 for item in self._env_config["players"][player_index]["give_items"]:
@@ -398,6 +392,14 @@ class MalmoInterface:
         )
         self._human_action_detection_thread.start()
 
+        if self._env_config["malmo"]["use_spectator"]:
+            self._spectator_thread: Optional[threading.Thread] = threading.Thread(
+                target=self._run_spectator
+            )
+            self._spectator_thread.start()
+        else:
+            self._spectator_thread = None
+
         # TODO: Do the palette here
         time.sleep(self._env_config["malmo"]["action_delay"])
 
@@ -414,6 +416,8 @@ class MalmoInterface:
 
         self._ai_actions_thread.join()
         self._human_action_detection_thread.join()
+        if self._spectator_thread is not None:
+            self._spectator_thread.join()
 
         with self._malmo_lock:
             time.sleep(1)
@@ -543,10 +547,6 @@ class MalmoInterface:
             self._ai_action_lock.notify()
 
     def _handle_ai_move_action(self, player_index: int, ai_action: MalmoMoveAIAction):
-        """
-        Executes a player's movement in Malmo. Returns the expected location difference.
-        """
-
         with self._malmo_lock:
             self._malmo_client.send_command(
                 player_index, "tp " + " ".join(map(str, ai_action.new_location))
@@ -655,11 +655,11 @@ class MalmoInterface:
                         f"chat /clear @p {MinecraftBlocks.ID2NAME[ai_action.action.block_id]} 0 1",
                     )
             else:
-                with self._malmo_state_lock:
-                    block_id = self._malmo_state.blocks.blocks[
-                        ai_action.action.block_location
-                    ]
-                    block_drop = self.NON_SILK_TOUCH_BLOCK_DROPS[block_id]
+                # with self._malmo_state_lock:
+                #     block_id = self._malmo_state.blocks.blocks[
+                #         ai_action.action.block_location
+                #     ]
+                #     block_drop = self.NON_SILK_TOUCH_BLOCK_DROPS[block_id]
 
                 time.sleep(0.1)  # Give time to teleport.
                 self._malmo_client.send_command(player_index, "attack 1")
@@ -667,15 +667,15 @@ class MalmoInterface:
                 # Some blocks don't drop themselves when broken (e.g., stone drops
                 # cobblestone). We need to check if the block dropped is the same as
                 # the block broken, and if not, fix it.
-                if block_drop != block_id:
-                    self._malmo_client.send_command(
-                        player_index,
-                        f"chat /clear @p {MinecraftBlocks.ID2NAME[block_drop]} 0 1",
-                    )
-                    self._malmo_client.send_command(
-                        player_index,
-                        f"chat /give @p {MinecraftBlocks.ID2NAME[block_id]} 1",
-                    )
+                # if block_drop != block_id:
+                #     self._malmo_client.send_command(
+                #         player_index,
+                #         f"chat /clear @p {MinecraftBlocks.ID2NAME[block_drop]} 0 1",
+                #     )
+                #     self._malmo_client.send_command(
+                #         player_index,
+                #         f"chat /give @p {MinecraftBlocks.ID2NAME[block_id]} 1",
+                #     )
 
                 # In case we accidentally broke a bedrock or barrier block, make sure
                 # it gets regenerated.
@@ -827,3 +827,76 @@ class MalmoInterface:
                 f"{self._palette_x} 0 0",
             )
             time.sleep(0.1)
+
+    def _run_spectator(self):
+        """
+        Run any spectator actions that need to be done, e.g., flying the spectator
+        around the environment if rotate_spectator is True.
+        """
+
+        agent_index = self._malmo_client._get_spectator_agent_index(self._env_config)
+        assert agent_index is not None
+
+        with self._malmo_lock:
+            self._malmo_client.send_command(
+                agent_index, "chat /gamerule sendCommandFeedback false"
+            )
+            self._malmo_client.send_command(agent_index, "chat /gamemode spectator")
+
+        # To start, we need to make the spectator fly by double tapping the jump key.
+        for jump_on in [1, 0, 1, 0]:
+            with self._malmo_lock:
+                self._malmo_client.send_command(agent_index, f"jump {jump_on}")
+            time.sleep(0.1)
+
+        width, height, depth = self._env_config["world_size"]
+
+        # The specatator should be consistently rotating about and looking at this point.
+        # center_x, center_y, center_z = width, height / 2, depth / 2
+        center_x, center_y, center_z = width / 2, height / 2, depth / 2
+
+        # The spectator rotates in an ellipsis around the center of the environment.
+        # x_axis_length = width + depth / 2
+        # z_axis_length = depth / 2 + width
+        x_axis_length = width / 2 + depth / 3
+        z_axis_length = depth / 2 + width / 3
+
+        min_x = center_x - x_axis_length
+        max_x = center_x + x_axis_length
+
+        rad_per_second = 0.1 if self._env_config["malmo"]["rotate_spectator"] else 0
+
+        start_time = time.time()
+
+        while not self._episode_done.is_set():
+            time_elapsed = time.time() - start_time
+            x = center_x + x_axis_length * np.sin(rad_per_second * time_elapsed)
+            y = center_y + 2
+            z = center_z + z_axis_length * -np.cos(rad_per_second * time_elapsed)
+
+            # We adjust y and x so that the spectator rises up as it goes over the
+            # wall between the current blocks and the goal.
+            u = (x - min_x) / (max_x - min_x)
+            x -= u * (x_axis_length - width / 2)
+            y += u * (height / 2)
+
+            pitch = np.rad2deg(
+                np.arctan(
+                    (y - center_y) / np.sqrt((x - center_x) ** 2 + (z - center_z) ** 2)
+                )
+            )
+            yaw = np.rad2deg(np.arctan2(x - center_x, center_z - z))
+
+            # Don't think we need to lock here because no other threads interact with
+            # the spectator AgentHost.
+            self._malmo_client.send_command(
+                agent_index, f"chat /teleport @p {x} {y - 1.6} {z}"
+            )
+            self._malmo_client.send_command(agent_index, f"setPitch {pitch}")
+            self._malmo_client.send_command(agent_index, f"setYaw {yaw}")
+
+            if rad_per_second == 0:
+                # No point in continuing to loop if we're not rotating the spectator.
+                break
+
+            time.sleep(0.03)

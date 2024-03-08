@@ -18,6 +18,12 @@ class MalmoConfigDict(TypedDict, total=False):
     Adds in a spectator player to observe the game from a 3rd person point of view.
     """
 
+    rotate_spectator: bool
+    """
+    If true, the spectator will slowly rotate around the play area so that different
+    angles of the building can be seen.
+    """
+
     restrict_players: bool
     """
     Places a group of barrier blocks around players that prevents them from leaving
@@ -226,6 +232,7 @@ DEFAULT_CONFIG: MbagConfigDict = {
     "malmo": {
         "use_malmo": False,
         "use_spectator": False,
+        "rotate_spectator": True,
         "restrict_players": False,
         "video_dir": None,
         "ssh_args": None,
@@ -290,8 +297,10 @@ def _merge_configs(config_a, config_b):
                 merged_config_dict[key] = config_a[key]
         return merged_config_dict
     elif isinstance(config_a, list):
-        if not isinstance(config_b, list) or len(config_a) != len(config_b):
+        if not isinstance(config_b, list):
             raise ValueError(f"Cannot merge {config_a} with {config_b}")
+        if len(config_a) != len(config_b):
+            return config_b
         merged_config_list = [_merge_configs(a, b) for a, b in zip(config_a, config_b)]
         return merged_config_list
     else:

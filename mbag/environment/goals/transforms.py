@@ -90,6 +90,25 @@ class AddGrassTransform(GoalTransform):
         return goal
 
 
+class RemoveInvisibleNonDirtTransform(GoalTransform):
+    """
+    Meant to be used after AddGrassTransform. Replaces any non-dirt blocks from the
+    bottom layer with dirt if they are not visible from the top.
+    """
+
+    def generate_goal(self, size: WorldSize) -> MinecraftBlocks:
+        goal = self.goal_generator.generate_goal(size)
+        bottom_layer = goal.blocks[:, 0, :]
+        next_layer = goal.blocks[:, 1, :]
+        visible = (next_layer == MinecraftBlocks.AIR) | (
+            next_layer == MinecraftBlocks.NAME2ID["glass"]
+        )
+        bottom_layer[~visible & (bottom_layer != MinecraftBlocks.AIR)] = (
+            MinecraftBlocks.NAME2ID["dirt"]
+        )
+        return goal
+
+
 class CropLowDensityBottomLayersTransformConfig(TypedDict):
     density_threshold: float
 

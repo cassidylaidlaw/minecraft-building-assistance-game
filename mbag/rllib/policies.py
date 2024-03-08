@@ -208,6 +208,19 @@ class MbagPPOTorchPolicy(PPOTorchPolicy):
 
         return loss
 
+    def postprocess_trajectory(
+        self, sample_batch, other_agent_batches=None, episode=None
+    ):
+        for rewards_key in [
+            SampleBatch.REWARDS,
+            SampleBatch.PREV_REWARDS,
+        ]:
+            if rewards_key in sample_batch:
+                sample_batch[rewards_key] *= self.config.get("reward_scale", 1.0)
+        return super().postprocess_trajectory(
+            sample_batch, other_agent_batches, episode
+        )
+
     def predict_goal_loss(
         self,
         model: MbagTorchModel,
@@ -314,12 +327,14 @@ class MbagPPOConfig(PPOConfig):
 
         self.goal_loss_coeff = 1.0
         self.place_block_loss_coeff = 1.0
+        self.reward_scale = 1.0
 
     def training(
         self,
         *args,
         goal_loss_coeff=NotProvided,
         place_block_loss_coeff=NotProvided,
+        reward_scale=NotProvided,
         **kwargs,
     ):
         super().training(*args, **kwargs)
@@ -328,6 +343,8 @@ class MbagPPOConfig(PPOConfig):
             self.goal_loss_coeff = goal_loss_coeff
         if place_block_loss_coeff is not NotProvided:
             self.place_block_loss_coeff = place_block_loss_coeff
+        if reward_scale is not NotProvided:
+            self.reward_scale = reward_scale
 
 
 class MbagPPO(PPO):

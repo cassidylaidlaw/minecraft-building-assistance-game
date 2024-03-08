@@ -125,6 +125,7 @@ def sacred_config(_log):  # noqa
     wall = False
     mirror = False
     min_width, min_height, min_depth = 4, 4, 4
+    remove_invisible_non_dirt = False
     if uniform_block_type:
         goal_transforms.append({"transform": "uniform_block_type"})
     if extract_largest_cc:
@@ -176,6 +177,8 @@ def sacred_config(_log):  # noqa
     goal_transforms.append({"transform": "density_filter", "config": density_config})
     goal_transforms.append({"transform": "randomly_place"})
     goal_transforms.append({"transform": "add_grass"})
+    if remove_invisible_non_dirt:
+        goal_transforms.append({"transform": "remove_invisible_non_dirt"})
     if mirror:
         goal_transforms.append({"transform": "mirror"})
     if force_single_cc:
@@ -271,6 +274,7 @@ def sacred_config(_log):  # noqa
     use_critic = True
     use_goal_predictor = True
     other_agent_action_predictor_loss_coeff = 1.0
+    reward_scale = 1.0
     pretrain = False
     strict_mode = False
 
@@ -379,6 +383,7 @@ def sacred_config(_log):  # noqa
     # Maps policy IDs in checkpoint_to_load_policies to policy IDs here
     load_policies_mapping: Dict[str, str] = {}
     overwrite_loaded_policy_type = False
+    load_config_from_checkpoint = not overwrite_loaded_policy_type
     if isinstance(load_policies_mapping, DogmaticDict):
         # Weird shim for sacred
         for key in load_policies_mapping.revelation():
@@ -449,12 +454,13 @@ def sacred_config(_log):  # noqa
             policy_spec = loaded_policy_dict[policy_id]
             if not isinstance(loaded_policy_dict, PolicySpec):
                 policy_spec = PolicySpec(*cast(tuple, policy_spec))
-            policy_spec.config = (
-                checkpoint_to_load_policies_config.copy().update_from_dict(
-                    policy_spec.config
+            if load_config_from_checkpoint:
+                policy_spec.config = (
+                    checkpoint_to_load_policies_config.copy().update_from_dict(
+                        policy_spec.config
+                    )
                 )
-            )
-            policy_spec.config.environment(env_config=dict(environment_params))
+                policy_spec.config.environment(env_config=dict(environment_params))
             policies[policy_id] = policy_spec
             if overwrite_loaded_policy_type:
                 policies[policy_id].policy_class = policy_class
@@ -547,6 +553,7 @@ def sacred_config(_log):  # noqa
             sgd_minibatch_size=sgd_minibatch_size,
             num_sgd_iter=num_sgd_iter,
             vf_loss_coeff=vf_loss_coeff,
+            vf_clip_param=float("inf"),
             entropy_coeff_schedule=[
                 [0, entropy_coeff_start],
                 [entropy_coeff_horizon, entropy_coeff_end],
@@ -561,9 +568,11 @@ def sacred_config(_log):  # noqa
             config.training(
                 goal_loss_coeff=goal_loss_coeff,
                 place_block_loss_coeff=place_block_loss_coeff,
+                reward_scale=reward_scale,
             )
     elif "AlphaZero" in run:
         assert isinstance(config, MbagAlphaZeroConfig)
+        assert reward_scale == 1.0, "Reward scaling not supported for AlphaZero"
         mcts_config = {
             "puct_coefficient": puct_coefficient,
             "num_simulations": num_simulations,
@@ -706,6 +715,21 @@ def main(
 
     if checkpoint_path is not None:
         _log.info(f"Restoring checkpoint at {checkpoint_path}")
+
+        old_set_state = trainer.__setstate__
+
+        def new_set_state(checkpoint_data):
+            # Remove config information from checkpoint_data so we don't override
+            # the current config.
+            if "config" in checkpoint_data:
+                del checkpoint_data["config"]
+            for policy_state in checkpoint_data["worker"]["policy_states"].values():
+                if "policy_spec" in policy_state:
+                    del policy_state["policy_spec"]
+            return old_set_state(checkpoint_data)
+
+        trainer.__setstate__ = new_set_state  # type: ignore
+
         trainer.restore(checkpoint_path)
 
     result = None
@@ -722,4 +746,7 @@ def main(
 
     trainer.stop()
 
+    if result is None:
+        result = {}
+    result["final_checkpoint"] = checkpoint
     return result

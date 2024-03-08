@@ -4,6 +4,7 @@ import tempfile
 
 import pytest
 
+from mbag.rllib.rollout import ex as rollout_ex
 from mbag.rllib.train import ex
 
 
@@ -43,6 +44,27 @@ def default_alpha_zero_config():
         "sample_batch_size": 100,
         "train_batch_size": 1,
         "num_sgd_iter": 1,
+    }
+
+
+@pytest.fixture(scope="session")
+def default_bc_config():
+    return {
+        "run": "BC",
+        "num_workers": 0,
+        "evaluation_num_workers": 2,
+        "use_extra_features": True,
+        "model": "transformer",
+        "use_separated_transformer": True,
+        "num_layers": 3,
+        "vf_share_layers": True,
+        "hidden_channels": 64,
+        "num_sgd_iter": 1,
+        "inf_blocks": False,
+        "teleportation": False,
+        "input": "data/human_data/sample_tutorial_rllib",
+        "is_human": [True],
+        "mask_action_distribution": False,
     }
 
 
@@ -384,26 +406,80 @@ def test_alpha_zero_assistant_pretraining_with_alpha_zero_human(
 
 @pytest.mark.uses_rllib
 @pytest.mark.timeout(60)
-def test_bc(default_config):
+def test_bc(default_config, default_bc_config):
     result = ex.run(
         config_updates={
             **default_config,
-            "run": "BC",
-            "num_workers": 0,
-            "evaluation_num_workers": 2,
-            "use_extra_features": True,
-            "model": "transformer",
-            "use_separated_transformer": True,
-            "num_layers": 3,
-            "vf_share_layers": True,
-            "hidden_channels": 64,
-            "num_sgd_iter": 1,
-            "inf_blocks": False,
-            "teleportation": False,
-            "input": "data/human_data/sample_tutorial_rllib",
-            "is_human": [True],
-            "mask_action_distribution": False,
+            **default_bc_config,
             "validation_prop": 0.1,
         }
     ).result
     assert result is not None
+
+
+@pytest.mark.uses_rllib
+@pytest.mark.timeout(60)
+def test_pikl(default_config, default_bc_config):
+    env_configs = {
+        "goal_generator": "tutorial",
+        "width": 6,
+        "depth": 6,
+        "height": 6,
+    }
+
+    bc_result = ex.run(
+        config_updates={
+            **default_config,
+            **default_bc_config,
+            **env_configs,
+            "goal_generator": "tutorial",
+            "validation_prop": 0.1,
+        }
+    ).result
+    assert bc_result is not None
+    bc_checkpoint = bc_result["final_checkpoint"]
+
+    alpha_zero_result = ex.run(
+        config_updates={
+            **default_config,
+            **default_bc_config,
+            **env_configs,
+            "run": "MbagAlphaZero",
+            "load_policies_mapping": {"human": "human"},
+            "is_human": [False],
+            "checkpoint_to_load_policies": bc_checkpoint,
+            "overwrite_loaded_policy_type": True,
+            "num_training_iters": 0,
+        }
+    ).result
+    assert alpha_zero_result is not None
+    alpha_zero_checkpoint = alpha_zero_result["final_checkpoint"]
+
+    pikl_result = rollout_ex.run(
+        config_updates={
+            "run": "MbagAlphaZero",
+            "episodes": 1,
+            "num_workers": 1,
+            "checkpoint": alpha_zero_checkpoint,
+            "extra_config_updates": {
+                "evaluation_config": {
+                    "explore": True,
+                    "line_of_sight_masking": True,
+                    "use_goal_predictor": False,
+                    "mcts_config": {
+                        "num_simulations": 5,
+                        "argmax_tree_policy": False,
+                        "temperature": 1,
+                        "dirichlet_epsilon": 0,
+                    },
+                    "env_config": {
+                        "players": [{"is_human": False}],
+                        "abilities": {
+                            "teleportation": False,
+                        },
+                    },
+                }
+            },
+        }
+    ).result
+    assert pikl_result is not None

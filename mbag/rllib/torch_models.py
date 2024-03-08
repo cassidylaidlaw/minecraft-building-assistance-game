@@ -1179,13 +1179,14 @@ class OtherAgentActionPredictorMixin(MbagTorchModel):
         self.other_agent_action_prediction_head = self._construct_action_head()
 
     def predict_other_agent_action(self) -> torch.Tensor:
-        logits: torch.Tensor = self.other_agent_action_prediction_head(
-            self._backbone_out
-        )
+        with self._amp_or_nothing:
+            logits: torch.Tensor = self.other_agent_action_prediction_head(
+                self._backbone_out
+            )
         flat_logits = MbagActionDistribution.to_flat_torch_logits(
             self.env_config, logits
         )
-        return flat_logits
+        return flat_logits.float()
 
 
 class MbagTransformerAlphaZeroModel(

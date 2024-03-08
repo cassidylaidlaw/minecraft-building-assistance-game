@@ -110,10 +110,6 @@ class MbagAction(object):
             return False
         return self.to_tuple() == other_action.to_tuple()
 
-    def to_json(self):
-        print("Serializing JSON")
-        return self.__str__()
-
     @classmethod
     def noop_action(cls):
         return cls((MbagAction.NOOP, 0, 0), (1, 1, 1))

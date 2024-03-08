@@ -1,11 +1,14 @@
 import copy
+import json
 import logging
 import traceback
 from dataclasses import dataclass
 from typing import Any, List, Tuple, Type
 
+import numpy as np
+
 from mbag.agents.mbag_agent import MbagAgent
-from mbag.environment.actions import MbagActionTuple
+from mbag.environment.actions import MbagAction, MbagActionTuple
 from mbag.environment.mbag_env import MbagConfigDict, MbagEnv
 from mbag.environment.types import MbagInfoDict, MbagObs
 
@@ -34,6 +37,21 @@ class EpisodeInfo:
             "length": self.length,
             "last_infos": self.last_infos,
         }
+
+
+class EpisodeInfoJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, np.bool_):
+            return bool(obj)
+        if isinstance(obj, MbagAction):
+            return obj.to_tuple()
+        return super().default(obj)
 
 
 class MbagEvaluator(object):
@@ -116,7 +134,7 @@ class MbagEvaluator(object):
                 raise exception
 
         if self.env.config["malmo"]["use_malmo"]:
-            self.env.malmo_client.end_mission()
+            self.env.malmo_interface.end_episode()
 
         episode_info = EpisodeInfo(
             env_config=copy.deepcopy(self.env.config),

@@ -20,7 +20,7 @@ from ray.rllib.models.modelv2 import restore_original_dimensions
 from ray.rllib.models.torch.torch_action_dist import TorchCategorical
 from ray.rllib.policy.policy import Policy
 from ray.rllib.policy.sample_batch import concat_samples
-from ray.rllib.policy.torch_mixins import EntropyCoeffSchedule
+from ray.rllib.policy.torch_mixins import EntropyCoeffSchedule, LearningRateSchedule
 from ray.rllib.policy.torch_policy import TorchPolicy
 from ray.rllib.policy.view_requirement import ViewRequirement
 from ray.rllib.utils.metrics import (
@@ -30,7 +30,11 @@ from ray.rllib.utils.metrics import (
     SYNCH_WORKER_WEIGHTS_TIMER,
 )
 from ray.rllib.utils.numpy import convert_to_numpy
-from ray.rllib.utils.torch_utils import explained_variance, sequence_mask
+from ray.rllib.utils.torch_utils import (
+    apply_grad_clipping,
+    explained_variance,
+    sequence_mask,
+)
 from ray.rllib.utils.typing import AgentID, PolicyID, ResultDict, TensorType
 from ray.tune.registry import ENV_CREATOR, _global_registry, register_trainable
 from torch import nn
@@ -654,7 +658,7 @@ class MbagMCTS(MCTS):
         )
 
 
-class MbagAlphaZeroPolicy(AlphaZeroPolicy, EntropyCoeffSchedule):
+class MbagAlphaZeroPolicy(AlphaZeroPolicy, EntropyCoeffSchedule, LearningRateSchedule):
     mcts: MbagMCTS
     envs: List[MbagEnvModel]
     config: Dict[str, Any]
@@ -712,11 +716,20 @@ class MbagAlphaZeroPolicy(AlphaZeroPolicy, EntropyCoeffSchedule):
         self.envs = []
         self.obs_space = observation_space
 
-        self.view_requirements[ACTION_MASK] = ViewRequirement()
-        self.view_requirements[SampleBatch.ACTION_DIST_INPUTS] = ViewRequirement()
+        self.view_requirements[ACTION_MASK] = ViewRequirement(
+            space=spaces.MultiBinary(action_space.n)
+        )
+        self.view_requirements[SampleBatch.ACTION_DIST_INPUTS] = ViewRequirement(
+            space=spaces.Box(low=-np.inf, high=np.inf, shape=(action_space.n,))
+        )
 
         EntropyCoeffSchedule.__init__(
             self, config["entropy_coeff"], config["entropy_coeff_schedule"]
+        )
+        LearningRateSchedule.__init__(
+            self,
+            config["lr"],
+            config["lr_schedule"],
         )
 
     def set_training(self, training: bool):
@@ -728,6 +741,31 @@ class MbagAlphaZeroPolicy(AlphaZeroPolicy, EntropyCoeffSchedule):
             self.global_timestep_for_envs = 2**63 - 1
         else:
             self.global_timestep_for_envs = getattr(self, "global_timestep", 0)
+
+    def compute_actions(
+        self,
+        obs_batch,
+        state_batches=None,
+        prev_action_batch=None,
+        prev_reward_batch=None,
+        info_batch=None,
+        episodes=None,
+        **kwargs,
+    ):
+
+        input_dict = {"obs": obs_batch}
+        if prev_action_batch is not None:
+            input_dict["prev_actions"] = prev_action_batch
+        if prev_reward_batch is not None:
+            input_dict["prev_rewards"] = prev_reward_batch
+        for state_index, state_batch in enumerate(state_batches or []):
+            input_dict[f"state_in_{state_index}"] = state_batch
+
+        return self.compute_actions_from_input_dict(
+            input_dict=input_dict,
+            episodes=episodes,
+            state_batches=state_batches,
+        )
 
     def compute_actions_from_input_dict(
         self, input_dict, explore=None, timestep=None, episodes=None, **kwargs
@@ -768,7 +806,16 @@ class MbagAlphaZeroPolicy(AlphaZeroPolicy, EntropyCoeffSchedule):
                 expected_own_rewards = np.zeros(len(episodes))
                 mcts_policies = np.zeros((len(episodes), self.action_space.n))
                 mcts_policies[:, 0] = 1
-                action_mask = np.zeros((len(episodes), self.action_space.n), dtype=bool)
+
+                # Get action mask.
+                assert isinstance(self.model, MbagTorchModel)
+                obs = input_dict[SampleBatch.OBS]
+                obs = restore_original_dimensions(obs, self.obs_space, "numpy")
+                action_mask = MbagActionDistribution.get_mask_flat(
+                    self.config["env_config"],
+                    obs,
+                    line_of_sight_masking=self.model.line_of_sight_masking,
+                )
             else:
                 nodes: List[MbagMCTSNode] = []
                 for env_index, episode in enumerate(episodes):
@@ -817,7 +864,7 @@ class MbagAlphaZeroPolicy(AlphaZeroPolicy, EntropyCoeffSchedule):
 
             for env_index, episode in enumerate(episodes):
                 if (
-                    self.config["_strict_mode"]
+                    self.config.get("_strict_mode", False)
                     and self._training
                     and not (
                         self.config["use_goal_predictor"]
@@ -1022,9 +1069,13 @@ class MbagAlphaZeroPolicy(AlphaZeroPolicy, EntropyCoeffSchedule):
 
         return total_loss
 
+    def extra_grad_process(self, optimizer, loss):
+        return apply_grad_clipping(self, optimizer, loss)
+
     def extra_grad_info(self, train_batch: SampleBatch):
         grad_info: Dict[str, TensorType] = {
             "entropy_coeff": self.entropy_coeff,
+            "cur_lr": self.cur_lr,
             "mcts/temperature": self.mcts.temperature,
         }
         for metric in [

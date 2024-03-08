@@ -62,6 +62,8 @@ class MalmoClient(object):
     ssh_processes: List[subprocess.Popen]
 
     def __init__(self):
+        # Importing malmo is necessary to set the MALMO_XSD_PATH environment variable.
+        import malmo  # noqa: F401
         import MalmoPython
 
         self.client_pool = MalmoPython.ClientPool()
@@ -182,50 +184,29 @@ class MalmoClient(object):
             </AgentSection>
             """
 
-    def _get_spectator_position(self, env_config: "MbagConfigDict") -> BlockLocation:
-        width, height, depth = env_config["world_size"]
-        x = width
-        y = height // 2 + 1
-        z = -width
-        return x, y, z
-
     def _get_spectator_agent_section_xml(self, env_config: "MbagConfigDict") -> str:
         width, height, depth = env_config["world_size"]
-        x, y, z = self._get_spectator_position(env_config)
-        pitch = np.rad2deg(np.arctan((y - height / 2) / (depth / 2 - z)))
-        return f"""
+        return """
         <AgentSection mode="Creative">
             <Name>spectator</Name>
             <AgentStart>
-                <Placement x="{x + 0.5}" y="{y}" z="{z + 0.5}" yaw="0" pitch="{pitch}" />
+                <Placement x="-2" y="2" z="-2" yaw="0" pitch="0" />
             </AgentStart>
             <AgentHandlers>
                 <VideoProducer>
                     <Width>640</Width>
                     <Height>480</Height>
                 </VideoProducer>
+                <AbsoluteMovementCommands />
+                <HumanLevelCommands>
+                    <ModifierList type="allow-list">
+                        <command>jump</command>
+                    </ModifierList>
+                </HumanLevelCommands>
+                <ChatCommands />
             </AgentHandlers>
         </AgentSection>
         """
-
-    def _get_spectator_platform_drawing_decorator_xml(
-        self, env_config: "MbagConfigDict"
-    ) -> str:
-        if env_config["malmo"]["use_spectator"]:
-            x, y, z = self._get_spectator_position(env_config)
-            return f"""
-            <DrawCuboid
-                type="bedrock"
-                x1="{x}"
-                y1="1"
-                z1="{z}"
-                x2="{x}"
-                y2="{y - 1}"
-                z2="{z}"
-            />
-            """
-        else:
-            return ""
 
     def _blocks_to_drawing_decorator_xml(
         self, blocks: MinecraftBlocks, offset: BlockLocation = (0, 0, 0)
@@ -326,7 +307,6 @@ class MalmoClient(object):
                         {self._draw_wall(env_config, "barrier", (-1, height, -1), (width, height, depth))}
                         {self._blocks_to_drawing_decorator_xml(goal_blocks, (width+1, 0, 0))}
                         {self._blocks_to_drawing_decorator_xml(current_blocks)}
-                        {self._get_spectator_platform_drawing_decorator_xml(env_config)}
                     </DrawingDecorator>
                     <BuildBattleDecorator>
                         <PlayerStructureBounds>
@@ -580,9 +560,7 @@ class MalmoClient(object):
                 if env_config["malmo"]["video_dir"]:
                     self._generate_record_fname(env_config)
                     record_spec = MalmoPython.MissionRecordSpec(self.record_fname)
-                    record_spec.recordMP4(
-                        MalmoPython.FrameType.VIDEO, 20, 400000, False
-                    )
+                    record_spec.recordMP4(MalmoPython.FrameType.VIDEO, 20, 400000, True)
 
             # Open up another tunnel for the Minecraft server once the first player's
             # game is started.

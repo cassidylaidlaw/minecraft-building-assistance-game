@@ -2,6 +2,7 @@ import random
 
 import numpy as np
 
+from mbag.environment import goals
 from mbag.environment.blocks import MinecraftBlocks
 from mbag.environment.goals.filters import DensityFilter, SingleConnectedComponentFilter
 from mbag.environment.goals.simple import RandomGoalGenerator, SetGoalGenerator
@@ -77,6 +78,21 @@ def test_add_grass():
         goal.blocks[goal.blocks != goal_no_grass.blocks]
         == MinecraftBlocks.NAME2ID["dirt"]
     )
+
+
+def test_remove_invisible_non_dirt():
+    goal_with_invisible = MinecraftBlocks((5, 5, 5))
+    goal_with_invisible.blocks[:, 0, :] = MinecraftBlocks.NAME2ID["dirt"]
+    goal_with_invisible.blocks[1:4, :2, 1] = MinecraftBlocks.NAME2ID["cobblestone"]
+    goal_with_invisible.blocks[1:4, 0, 2] = MinecraftBlocks.NAME2ID["cobblestone"]
+    goal_with_invisible.blocks[1:4, 0, 3] = MinecraftBlocks.NAME2ID["air"]
+    transform = goals.transforms.RemoveInvisibleNonDirtTransform(
+        {}, goals.simple.SetGoalGenerator({"goals": [goal_with_invisible]})
+    )
+    goal = transform.generate_goal((5, 5, 5))
+    assert np.all(goal.blocks[1:4, 0, 1] == MinecraftBlocks.NAME2ID["dirt"])
+    assert np.all(goal.blocks[1:4, 0, 2] == MinecraftBlocks.NAME2ID["cobblestone"])
+    assert np.all(goal.blocks[1:4, 0, 3] == MinecraftBlocks.NAME2ID["air"])
 
 
 def test_largest_cc():
