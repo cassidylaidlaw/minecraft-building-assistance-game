@@ -252,6 +252,7 @@ def sacred_config(_log):  # noqa
     simple_optimizer = True
     num_training_iters = 500  # noqa: F841
     lr = 1e-3
+    lr_schedule = lr
     grad_clip = 10
     gamma = 0.95
     gae_lambda = 0.98
@@ -540,6 +541,7 @@ def sacred_config(_log):  # noqa
         assert isinstance(config, PPOConfig)
         config.training(
             lr=lr,
+            lr_schedule=convert_dogmatics_to_standard(lr_schedule),
             gamma=gamma,
             train_batch_size=train_batch_size,
             sgd_minibatch_size=sgd_minibatch_size,
@@ -582,6 +584,7 @@ def sacred_config(_log):  # noqa
         }
         config.training(
             lr=lr,
+            lr_schedule=convert_dogmatics_to_standard(lr_schedule),
             gamma=gamma,
             train_batch_size=train_batch_size,
             sgd_minibatch_size=sgd_minibatch_size,
