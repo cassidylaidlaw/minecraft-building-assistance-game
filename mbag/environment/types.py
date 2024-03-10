@@ -117,10 +117,39 @@ class MbagInfoDict(TypedDict):
     the sum of goal_dependent_reward and goal_independent_reward.
     """
 
+    noop_reward: float
+    """
+    The current reward for doing any action which does nothing. Note that this is
+    the reward the player would receive, not necessarily the reward the player
+    received at this step.
+    """
+
+    action_reward: float
+    """
+    The current reward for doing any action which is not a noop.  Note that this is
+    the reward the player would receive, not necessarily the reward the player
+    received at this step.
+    """
+
+    place_wrong_reward: float
+    """
+    The current reward for placing a block which is not correct, but in a place where a block
+    should go. The negative of this is also given for breaking a block which is not
+    correct.  Note that this is the reward the player would receive, not necessarily
+    the reward the player received at this step.
+    """
+
     own_reward_prop: float
     """
     The current proportion of this player's reward which is coming from their own
     direct actions, as opposed to other agents'.
+    """
+
+    get_resources_reward: float
+    """
+    The current reward for getting a resource block from the palette that the player
+    did not have in their inventory previously.  Note that this is the reward the
+    player would receive, not necessarily the reward the player received at this step.
     """
 
     attempted_action: "MbagAction"

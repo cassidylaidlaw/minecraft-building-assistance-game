@@ -951,6 +951,7 @@ class MbagEnv(object):
         action: MbagAction = MbagAction.noop_action(),
         action_correct: bool = False,
     ) -> MbagInfoDict:
+        reward_dict = self._get_all_rewards(player_index, self.global_timestep)
         info: MbagInfoDict = {
             "goal_similarity": self._get_goal_similarity(
                 self.current_blocks[:],
@@ -959,7 +960,11 @@ class MbagEnv(object):
             "goal_dependent_reward": goal_dependent_reward,
             "goal_independent_reward": goal_independent_reward,
             "own_reward": own_reward,
+            "noop_reward": reward_dict["noop"],
+            "action_reward": reward_dict["action"],
+            "place_wrong_reward": reward_dict["place_wrong"],
             "own_reward_prop": self._get_own_reward_prop(player_index),
+            "get_resources_reward": reward_dict["get_resources"],
             "attempted_action": attempted_action,
             "action": action,
             "action_correct": action_correct,
@@ -992,6 +997,14 @@ class MbagEnv(object):
         self, player_index: int, reward: str, global_timestep: int
     ) -> float:
         return self._reward_schedules[player_index][reward].value(global_timestep)
+
+    def _get_all_rewards(
+        self, player_index: int, global_timestep: int
+    ) -> Dict[str, float]:
+        return {
+            reward: schedule.value(global_timestep)
+            for reward, schedule in self._reward_schedules[player_index].items()
+        }
 
     def _get_reward_config_for_player(self, player_index: int) -> RewardsConfigDict:
         return self.config["players"][player_index]["rewards"]

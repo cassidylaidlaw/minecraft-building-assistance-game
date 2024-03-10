@@ -169,8 +169,20 @@ class MbagCallbacks(AlphaZeroDefaultCallbacks):
         for agent_id in episode.get_agents():
             policy_id = worker.policy_mapping_fn(agent_id, episode, worker)
             info_dict, self._get_last_info(episode, agent_id)
+            episode.custom_metrics[f"{policy_id}/noop_reward"] = info_dict[
+                "noop_reward"
+            ]
+            episode.custom_metrics[f"{policy_id}/action_reward"] = info_dict[
+                "action_reward"
+            ]
+            episode.custom_metrics[f"{policy_id}/place_wrong_reward"] = info_dict[
+                "place_wrong_reward"
+            ]
             episode.custom_metrics[f"{policy_id}/own_reward_prop"] = info_dict[
                 "own_reward_prop"
+            ]
+            episode.custom_metrics[f"{policy_id}/get_resources_reward"] = info_dict[
+                "get_resources_reward"
             ]
 
             action_type_names = [MBAG_ACTION_BREAK_PALETTE_NAME] + [
