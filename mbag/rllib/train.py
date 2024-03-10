@@ -255,7 +255,7 @@ def sacred_config(_log):  # noqa
     simple_optimizer = True
     num_training_iters = 500  # noqa: F841
     lr = 1e-3
-    lr_schedule = lr
+    lr_schedule = None
     grad_clip = 10
     gamma = 0.95
     gae_lambda = 0.98

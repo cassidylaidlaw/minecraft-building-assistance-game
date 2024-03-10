@@ -1102,6 +1102,11 @@ class MbagAlphaZeroPolicy(AlphaZeroPolicy, EntropyCoeffSchedule, LearningRateSch
             self.entropy_coeff = self._entropy_coeff_schedule.value(
                 global_vars["timestep"]
             )
+        if self._lr_schedule is not None:
+            self.cur_lr = self._lr_schedule.value(global_vars["timestep"])
+            for opt in self._optimizers:
+                for p in opt.param_groups:
+                    p["lr"] = self.cur_lr
         self.mcts.update_temperature(global_timestep=global_vars["timestep"])
 
         if self._training:
