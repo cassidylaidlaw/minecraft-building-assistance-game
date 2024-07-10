@@ -66,8 +66,8 @@ def make_named_configs(ex: Experiment):
         model = "transformer_with_discriminator"
         data_split = "human_alone"
         demonstration_input = (
-            f"data/human_data_cleaned/{data_split}/"
-            f"infinite_blocks_{str(inf_blocks).lower()}/"
+            "/nas/ucb/cassidy/minecraft-building-assistance-game/data/"
+            f"human_data_cleaned/{data_split}/infinite_blocks_{str(inf_blocks).lower()}/"
             "rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_0"
         )
         train_discriminator_on_separate_batch = False
@@ -151,8 +151,8 @@ def make_named_configs(ex: Experiment):
         inf_blocks = True
         teleportation = False
         input = (
-            f"data/human_data_cleaned/{data_split}/"
-            f"infinite_blocks_{str(inf_blocks).lower()}/"
+            "/nas/ucb/cassidy/minecraft-building-assistance-game/data/"
+            f"human_data_cleaned/{data_split}/infinite_blocks_{str(inf_blocks).lower()}/"
             "rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_0"
         )
         train_batch_size = {
