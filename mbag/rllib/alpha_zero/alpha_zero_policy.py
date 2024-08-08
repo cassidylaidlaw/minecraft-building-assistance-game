@@ -243,12 +243,21 @@ class MbagAlphaZeroPolicy(EntropyCoeffSchedule, LearningRateSchedule, AlphaZeroP
 
         nodes: List[MbagMCTSNode] = []
         for env_index in range(num_envs):
+            # assert isinstance(obs_batch, tuple), type(obs_batch)
+            # assert len(obs_batch) == 3, len(obs_batch)
+            # obs_timestep = obs_batch[2]
+            # assert obs_timestep.shape == (1,), obs_timestep.shape
+            # obs_timestep = obs_timestep[0]
+
             env_obs = tuple(obs_piece[env_index] for obs_piece in obs)
+            timestep = env_obs[2]
             env_state = self.envs[env_index].set_state_from_obs(env_obs)
             model_state = [
                 input_dict[f"state_in_{state_index}"][env_index]
                 for state_index in range(model_state_len)
             ]
+            mcts = copy.deepcopy(self.mcts)
+            mcts.update_from_timestep(timestep)
             nodes.append(
                 MbagMCTSNode(
                     state=env_state,
@@ -259,7 +268,7 @@ class MbagAlphaZeroPolicy(EntropyCoeffSchedule, LearningRateSchedule, AlphaZeroP
                     action=None,
                     parent=MbagRootParentNode(env=self.envs[env_index]),
                     model_state_in=model_state,
-                    mcts=self.mcts,
+                    mcts=mcts,
                 )
             )
 

@@ -594,6 +594,7 @@ class MbagMCTSNode:
 class MbagMCTS(MCTS):
     c_puct: Union[float, Sequence[float]]
     _temperature_schedule: Optional[Schedule]
+    _puct_coefficient_schedule: Optional[Schedule]
 
     def __init__(
         self,
@@ -617,6 +618,14 @@ class MbagMCTS(MCTS):
                 outside_value=mcts_param["temperature_schedule"][-1][-1],
             )
             self.temperature = self._temperature_schedule.value(0)
+
+        self._puct_coefficient_schedule = None
+        if mcts_param["puct_coefficient_schedule"] is not None:
+            self._puct_coefficient_schedule = PiecewiseSchedule(
+                mcts_param["puct_coefficient_schedule"],
+                outside_value=mcts_param["puct_coefficient_schedule"][-1][-1],
+            )
+            self.c_puct = self._puct_coefficient_schedule.value(0)
 
         self.prior_temperature = mcts_param.get("prior_temperature", 1.0)
         self.init_q_with_max = mcts_param.get("init_q_with_max", False)
@@ -652,9 +661,17 @@ class MbagMCTS(MCTS):
             "fix_bilevel_action_selection", False
         )
 
+    def update_from_timestep(self, global_timestep: int):
+        self.update_temperature(global_timestep)
+        self._update_puct_coefficient(global_timestep)
+
     def update_temperature(self, global_timestep: int):
         if self._temperature_schedule is not None:
             self.temperature = self._temperature_schedule.value(global_timestep)
+
+    def _update_puct_coefficient(self, global_timestep: int):
+        if self._puct_coefficient_schedule is not None:
+            self.c_puct = self._puct_coefficient_schedule.value(global_timestep)
 
     def compute_action(self, node: MbagMCTSNode) -> Tuple[np.ndarray, int]:
         tree_policies, actions = self.compute_actions([node])

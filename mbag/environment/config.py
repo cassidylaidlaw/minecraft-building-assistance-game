@@ -3,8 +3,8 @@ from typing import List, Literal, Optional, Tuple, Type, TypedDict, Union, cast
 from .goals import GoalGenerator, GoalGeneratorConfig, TransformedGoalGenerator
 from .types import WorldSize
 
-RewardScheduleEndpoints = List[Tuple[int, float]]
-RewardSchedule = Union[float, RewardScheduleEndpoints]
+ScheduleEndpoints = List[Tuple[int, float]]
+ScheduleConfig = Union[float, ScheduleEndpoints]
 
 
 class MalmoConfigDict(TypedDict, total=False):
@@ -56,33 +56,33 @@ class MalmoConfigDict(TypedDict, total=False):
 
 
 class RewardsConfigDict(TypedDict, total=False):
-    noop: RewardSchedule
+    noop: ScheduleConfig
     """
     The reward for doing any action which does nothing. This is usually either zero,
     or negative to discourage noops.
     """
 
-    action: RewardSchedule
+    action: ScheduleConfig
     """
     The reward for doing any action which is not a noop. This could be negative to
     introduce some cost for acting.
     """
 
-    place_wrong: RewardSchedule
+    place_wrong: ScheduleConfig
     """
     The reward for placing a block which is not correct, but in a place where a block
     should go. The negative of this is also given for breaking a block which is not
     correct.
     """
 
-    own_reward_prop: RewardSchedule
+    own_reward_prop: ScheduleConfig
     """
     A number from 0 to 1. At 0, it gives the normal reward function which takes into
     account all players actions. At 1, it gives only reward for actions that the
     specific player took.
     """
 
-    get_resources: RewardSchedule
+    get_resources: ScheduleConfig
     """
     The reward for getting a resource block from the palette that the player
     did not have in their inventory previously.

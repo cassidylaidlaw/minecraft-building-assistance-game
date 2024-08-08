@@ -28,7 +28,7 @@ from typing_extensions import Literal
 
 import mbag
 from mbag.agents.heuristic_agents import ALL_HEURISTIC_AGENTS
-from mbag.environment.config import MbagConfigDict, MbagPlayerConfigDict, RewardSchedule
+from mbag.environment.config import MbagConfigDict, MbagPlayerConfigDict, ScheduleConfig
 from mbag.environment.goals.demonstrations import DemonstrationsGoalGeneratorConfig
 from mbag.environment.goals.filters import DensityFilterConfig, MinSizeFilterConfig
 from mbag.environment.goals.goal_transform import (
@@ -114,16 +114,16 @@ def sacred_config(_log):  # noqa
     is_human = [False] * num_players
     goal_generator_config = {"subset": goal_subset}
 
-    noop_reward: RewardSchedule = 0
-    per_player_noop_reward: Optional[List[RewardSchedule]] = None
-    get_resources_reward: RewardSchedule = 0
-    per_player_get_resources_reward: Optional[List[RewardSchedule]] = None
-    action_reward: RewardSchedule = 0
-    per_player_action_reward: Optional[List[RewardSchedule]] = None
-    place_wrong_reward: RewardSchedule = -1
-    per_player_place_wrong_reward: Optional[List[RewardSchedule]] = None
-    own_reward_prop: RewardSchedule = 0
-    per_player_own_reward_prop: Optional[List[RewardSchedule]] = None
+    noop_reward: ScheduleConfig = 0
+    per_player_noop_reward: Optional[List[ScheduleConfig]] = None
+    get_resources_reward: ScheduleConfig = 0
+    per_player_get_resources_reward: Optional[List[ScheduleConfig]] = None
+    action_reward: ScheduleConfig = 0
+    per_player_action_reward: Optional[List[ScheduleConfig]] = None
+    place_wrong_reward: ScheduleConfig = -1
+    per_player_place_wrong_reward: Optional[List[ScheduleConfig]] = None
+    own_reward_prop: ScheduleConfig = 0
+    per_player_own_reward_prop: Optional[List[ScheduleConfig]] = None
 
     goal_transforms: List[GoalTransformSpec] = []
     uniform_block_type = False
@@ -320,6 +320,7 @@ def sacred_config(_log):  # noqa
 
     # MCTS
     puct_coefficient = 1.0
+    puct_coefficient_schedule: Optional[ScheduleConfig] = None
     num_simulations = 30
     temperature = 1.5
     temperature_start = temperature
@@ -686,6 +687,7 @@ def sacred_config(_log):  # noqa
         assert reward_scale == 1.0, "Reward scaling not supported for AlphaZero"
         mcts_config: Dict[str, Any] = {
             "puct_coefficient": puct_coefficient,
+            "puct_coefficient_schedule": puct_coefficient_schedule,
             "num_simulations": num_simulations,
             "temperature": temperature,
             "temperature_schedule": None,
