@@ -1,4 +1,3 @@
-import collections
 import copy
 import glob
 import json
@@ -14,6 +13,8 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union, cast
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+
+from mbag.environment.config import ScheduleConfig
 
 ROOT_DIR = "/nas/ucb/ebronstein/minecraft-building-assistance-game"
 ALL_DATA_SPLITS = ["combined", "human_alone", "human_with_assistant"]
@@ -69,6 +70,7 @@ DEFAULT_HUMAN_ALPHAZERO_ENV_VARS = dict(
     PRIOR_TEMPERATURE=1.0,
     INIT_Q_WITH_MAX=False,
     PUCT_COEFFICIENT=1,
+    PUCT_COEFFICIENT_SCHEDULE=None,
     GAMMA=0.95,
     LR=0.001,
     GRAD_CLIP=10,
@@ -311,8 +313,9 @@ def make_alphazero_from_bc_tag(env_vars: dict) -> str:
     if num_simulations is not None:
         tag += f"/sim_{num_simulations}"
     puct_coefficient = env_vars.get("PUCT_COEFFICIENT")
+    puct_coefficient_schedule = env_vars.get("PUCT_COEFFICIENT_SCHEDULE")
     if puct_coefficient is not None:
-        tag += f"/{make_puct_coeff_tag(puct_coefficient)}"
+        tag += f"/{make_puct_coeff_tag(puct_coefficient, puct_coefficient_schedule)}"
 
     tag += f"/seed_{env_vars['SEED']}"
 
@@ -478,10 +481,32 @@ def make_train_tag(env_vars: dict, algorithm: Algorithm, agent: Agent) -> str:
     return tag
 
 
+def make_schedule_str(schedule: ScheduleConfig) -> str:
+    if isinstance(schedule, (float, int)):
+        if int(schedule) == schedule:
+            schedule = int(schedule)
+        return str(schedule)
+    else:
+        parts = [f"{step}_{value}" for step, value in schedule]
+        return "-".join(parts)
+
+
+def parse_puct_coefficient_schedule_str(schedule_str: str) -> ScheduleConfig:
+    parts = schedule_str.split("-")
+    schedule = []
+    for part in parts:
+        step, value = part.split("_")
+        schedule.append((int(step), float(value)))
+    return schedule
+
+
 def make_puct_coeff_tag(
-    puct_coeff: Union[float, List[float], Tuple[float, ...]]
+    puct_coeff: Union[float, List[float], Tuple[float, ...]],
+    puct_coeff_schedule: Optional[ScheduleConfig],
 ) -> str:
-    if isinstance(puct_coeff, (int, float)):
+    if puct_coeff_schedule is not None:
+        puct_coeff_str = f"schedule_{make_schedule_str(puct_coeff_schedule)}"
+    elif isinstance(puct_coeff, (int, float)):
         puct_coeff_str = str(puct_coeff)
     elif isinstance(puct_coeff, (tuple, list)):
         puct_coeff_str = "mixture_" + "_".join(map(str, puct_coeff))
@@ -494,7 +519,9 @@ def make_puct_coeff_tag(
 def make_mcts_eval_tag(config: Dict[str, Any]) -> str:
     # config is algorithm_config_updates
     mcts_config = config["mcts_config"]
-    puct_coeff_str = make_puct_coeff_tag(mcts_config["puct_coefficient"])
+    puct_coeff_str = make_puct_coeff_tag(
+        mcts_config["puct_coefficient"], mcts_config.get("puct_coefficient_schedule")
+    )
 
     tag = f"sim_{mcts_config['num_simulations']}/temp_{mcts_config['temperature']}/{puct_coeff_str}/prior_temp_{mcts_config['prior_temperature']}/critic_{config['use_critic']}/explore_{config['explore']}"
 
@@ -1624,6 +1651,13 @@ def summarize_episode_metrics(episode_metrics: Dict[str, Any]) -> pd.DataFrame:
     # return pd.concat([summary_metrics_df, grouped_actions_df], ignore_index=True)
 
 
+def make_int_or_float(value: str) -> Union[int, float]:
+    value = float(value)
+    if int(value) == value:
+        value = int(value)
+    return value
+
+
 def infer_mcts_params_from_path(eval_path: Union[str, pathlib.Path]) -> Dict[str, Any]:
     eval_path = pathlib.Path(eval_path)
     num_sims = next(p for p in eval_path.parts if p.startswith("sim_"))
@@ -1633,10 +1667,15 @@ def infer_mcts_params_from_path(eval_path: Union[str, pathlib.Path]) -> Dict[str
     puct_coefficient = puct_coefficient[len("puct_coeff_") :]
     if puct_coefficient.startswith("mixture_"):
         puct_coefficient = list(
-            map(int, puct_coefficient[len("mixture_") :].split("_"))
+            map(make_int_or_float, puct_coefficient[len("mixture_") :].split("_"))
         )
+    elif puct_coefficient.startswith("schedule_"):
+        puct_coefficient = puct_coefficient[len("schedule_") :]
+        puct_coefficient = parse_puct_coefficient_schedule_str(puct_coefficient)
     else:
-        puct_coefficient = int(puct_coefficient)
+        puct_coefficient = float(puct_coefficient)
+        if int(puct_coefficient) == puct_coefficient:
+            puct_coefficient = int(puct_coefficient)
 
     return {"num_simulations": num_sims, "puct_coefficient": puct_coefficient}
 
@@ -2395,6 +2434,9 @@ def get_human_eval_env_vars_and_metrics_for_experiment(
         if run == "MbagAlphaZero":
             num_simulations = experiment_config["num_simulations"]
             puct_coeff = experiment_config["puct_coefficient"]
+            puct_coefficient_schedule = experiment_config.get(
+                "puct_coefficient_schedule"
+            )
             prior_temp = experiment_config["prior_temperature"]
             explore_noops = experiment_config["explore_noops"]
             algorithm_config_updates = {
@@ -2402,6 +2444,7 @@ def get_human_eval_env_vars_and_metrics_for_experiment(
                     "num_simulations": num_simulations,
                     "temperature": 1,
                     "puct_coefficient": puct_coeff,
+                    "puct_coefficient_schedule": puct_coefficient_schedule,
                     "add_dirichlet_noise": False,
                     "temperature_schedule": None,
                     "argmax_tree_policy": False,
@@ -2543,7 +2586,7 @@ def get_bc_to_alphazero_conversion_env_vars(
             for key in ["TELEPORTATION", "INF_BLOCKS", "NUM_LAYERS", "HIDDEN_SIZE"]
         }
         # Optional arguments
-        for key in ["NUM_SIMULATIONS", "PUCT_COEFFICIENT"]:
+        for key in ["NUM_SIMULATIONS", "PUCT_COEFFICIENT", "PUCT_COEFFICIENT_SCHEDULE"]:
             if key in bc_env_vars:
                 bc_to_alphazero_env_vars[key] = bc_env_vars[key]
         bc_to_alphazero_env_vars["CHECKPOINT"] = checkpoint_dir
