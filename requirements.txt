@@ -1,7 +1,0 @@
-numpy>=1.21,<1.22
-ray[rllib]==2.7.1
-torch>=1.8
-connected-components-3d==3.12.3
-types-PyYAML==5.4.3
-sacred==0.8.4
-tqdm

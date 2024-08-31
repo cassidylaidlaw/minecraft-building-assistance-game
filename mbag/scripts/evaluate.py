@@ -7,6 +7,7 @@ import os
 import pickle
 import random
 import signal
+import time
 import zipfile
 from datetime import datetime
 from logging import Logger
@@ -64,7 +65,70 @@ def sacred_config():
     save_episodes = use_malmo  # noqa: F841
 
     env_config_updates = {}  # noqa: F841
-    algorithm_config_updates = {}  # noqa: F841
+    algorithm_config_updates: List[dict] = [{}]  # noqa: F841
+
+    # Used by named configs
+    assistant_checkpoint = None  # noqa: F841
+    assistant_run = None  # noqa: F841
+    num_simulations = None  # noqa: F841
+    goal_set = None  # noqa: F841
+    house_id = None  # noqa: F841
+
+
+@ex.named_config
+def human_alone():
+    assistant_checkpoint = None
+    goal_set = "test"
+    house_id = None
+
+    runs = ["HumanAgent"]  # noqa: F841
+    checkpoints = [assistant_checkpoint]  # noqa: F841
+    policy_ids = [None]  # noqa: F841
+    num_episodes = 1  # noqa: F841
+    algorithm_config_updates: List[dict] = [{}]  # noqa: F841
+    env_config_updates = {  # noqa: F841
+        "goal_generator_config": {
+            "goal_generator_config": {"subset": goal_set, "house_id": house_id}
+        },
+        "malmo": {"action_delay": 0.8, "rotate_spectator": False},
+        "horizon": 10000,
+        "players": [{"player_name": "human"}],
+    }
+    min_action_interval = 0.8  # noqa: F841
+    use_malmo = True  # noqa: F841
+
+
+@ex.named_config
+def human_with_assistant():
+    assistant_checkpoint = None
+    assistant_run = "MbagAlphaZero"
+    num_simulations = 10
+    goal_set = "test"
+    house_id = None
+
+    runs = ["HumanAgent", assistant_run]  # noqa: F841
+    checkpoints = [None, assistant_checkpoint]  # noqa: F841
+    policy_ids = [None, "assistant"]  # noqa: F841
+    num_episodes = 1  # noqa: F841
+    algorithm_config_updates = [  # noqa: F841
+        {},
+        {
+            "num_gpus": 1 if torch.cuda.is_available() else 0,
+            "num_gpus_per_worker": 0,
+            "player_index": 1,
+            "mcts_config": {"num_simulations": num_simulations},
+        },
+    ]
+    env_config_updates = {  # noqa: F841
+        "goal_generator_config": {
+            "goal_generator_config": {"subset": goal_set, "house_id": house_id}
+        },
+        "malmo": {"action_delay": 0.8, "rotate_spectator": False},
+        "horizon": 10000,
+        "players": [{"player_name": "human"}, {"player_name": "assistant"}],
+    }
+    min_action_interval = 0.8  # noqa: F841
+    use_malmo = True  # noqa: F841
 
 
 def run_evaluation(
@@ -76,7 +140,7 @@ def run_evaluation(
     explore: List[bool],
     confidence_thresholds: Optional[List[Optional[float]]],
     env_config_updates: MbagConfigDict,
-    algorithm_config_updates: dict,
+    algorithm_config_updates: List[dict],
     seed: int,
     record_video: bool,
     use_malmo: bool,
@@ -88,16 +152,11 @@ def run_evaluation(
         include_dashboard=False,
     )
 
-    algorithm_config_updates["seed"] = seed
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
 
     env_config_updates.setdefault("randomize_first_episode_length", False)
-
-    algorithm_config_updates.setdefault("num_workers", 0)
-    algorithm_config_updates.setdefault("num_envs_per_worker", 1)
-    algorithm_config_updates.setdefault("evaluation_num_workers", 0)
 
     # Try to load env config from the first checkpoint.
     env_config: Optional[MbagConfigDict] = None
@@ -113,6 +172,7 @@ def run_evaluation(
         env_config["players"].append(copy.deepcopy(env_config["players"][0]))
         player_index = len(env_config["players"]) - 1
         env_config["players"][-1]["player_name"] = f"player_{player_index}"
+    env_config["players"] = env_config["players"][: env_config["num_players"]]
     for player_index, run in enumerate(runs):
         if run == "HumanAgent":
             env_config["players"][player_index]["is_human"] = True
@@ -123,12 +183,10 @@ def run_evaluation(
 
     observation_space = MbagEnv(env_config).observation_space
 
-    algorithm_config_updates["env_config"] = copy.deepcopy(env_config)
-
     agent_configs: List[MbagAgentConfig] = []
     trainers: List[Algorithm] = []
-    for player_index, (run, checkpoint, policy_id) in enumerate(
-        zip(runs, checkpoints, policy_ids)
+    for player_index, (run, checkpoint, policy_id, config_updates) in enumerate(
+        zip(runs, checkpoints, policy_ids, algorithm_config_updates)
     ):
         if run == "HumanAgent":
             agent_configs.append((HumanAgent, {}))
@@ -137,10 +195,16 @@ def run_evaluation(
         else:
             assert checkpoint is not None and policy_id is not None
 
+            config_updates["seed"] = seed
+            config_updates.setdefault("num_workers", 0)
+            config_updates.setdefault("num_envs_per_worker", 1)
+            config_updates.setdefault("evaluation_num_workers", 0)
+            config_updates["env_config"] = copy.deepcopy(env_config)
+
             trainer = load_trainer(
                 checkpoint,
                 run,
-                copy.deepcopy(algorithm_config_updates),
+                copy.deepcopy(config_updates),
             )
             policy = trainer.get_policy(policy_id)
             policy.observation_space = observation_space
@@ -195,7 +259,7 @@ def evaluation_worker(
     explore: List[bool],
     confidence_thresholds: Optional[List[Optional[float]]],
     env_config_updates: MbagConfigDict,
-    algorithm_config_updates: dict,
+    algorithm_config_updates: List[dict],
     seed: int,
     record_video: bool,
     use_malmo: bool,
@@ -245,7 +309,7 @@ def main(  # noqa: C901
     num_episodes: int,
     experiment_tag: str,
     env_config_updates: MbagConfigDict,
-    algorithm_config_updates: dict,
+    algorithm_config_updates: List[dict],
     seed: int,
     record_video: bool,
     use_malmo: bool,
@@ -323,6 +387,7 @@ def main(  # noqa: C901
             process.start()
             processes.append(process)
             queues.append(queue)
+            time.sleep(10)
         episode_generator = queue_episode_generator(queues)
 
     episodes: List[MbagEpisode] = []

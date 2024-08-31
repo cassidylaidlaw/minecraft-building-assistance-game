@@ -67,14 +67,15 @@ def load_trainer(
 
     config = config_update_fn(config)
 
-    # Create the Trainer from config.
+    # Fix issues with unpickling checkpoints created by different Python versions.
+    state["worker"]["is_policy_to_train"] = lambda *args, **kwargs: False
+
+    # Create the Trainer from config and state.
     if isinstance(run, str):
         cls = cast(Type[Algorithm], get_trainable_cls(run))
     else:
         cls = run
     trainer: Algorithm = cls.from_state(state)
-    # Load state from checkpoint.
-    trainer.restore(checkpoint_path)
 
     return trainer
 

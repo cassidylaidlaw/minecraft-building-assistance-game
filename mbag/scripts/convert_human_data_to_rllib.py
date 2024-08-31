@@ -40,8 +40,12 @@ def sacred_config():
     place_wrong_reward = 0  # noqa: F841
     player_indices = [0]  # noqa: F841
     inventory_player_indices = player_indices  # noqa: F841
-    max_seq_len = None  # noqa: F841
     policy_id = None  # noqa: F841
+    max_seq_len = None  # noqa: F841
+
+    # sequence_overlap > 1 outputs multiple copies of each episode split into sequences
+    # that are overlapping.
+    sequence_overlap = 1  # noqa: F841
 
     experiment_name = "rllib"
     if not include_noops:
@@ -57,6 +61,7 @@ def sacred_config():
     )
     experiment_name += f"_repaired_player_{'_'.join(map(str, player_indices))}"
     experiment_name += f"_seq_{max_seq_len}" if max_seq_len is not None else ""
+    experiment_name += f"_overlap_{sequence_overlap}" if sequence_overlap > 1 else ""
     out_dir = os.path.join(data_dir, experiment_name)  # noqa: F841
 
 
@@ -75,8 +80,9 @@ def main(  # noqa: C901
     place_wrong_reward: float,
     player_indices: List[int],
     inventory_player_indices: List[int],
-    max_seq_len: Optional[int],
     policy_id: Optional[str],
+    max_seq_len: Optional[int],
+    sequence_overlap: int,
     _log: logging.Logger,
 ):
     episode: MbagEpisode
@@ -148,14 +154,6 @@ def main(  # noqa: C901
                 action_delay=action_delay,
             )
 
-            if max_seq_len is not None:
-                remaining_length = len(sample_batch)
-                seq_lens: List[int] = []
-                while remaining_length > 0:
-                    seq_lens.append(min(remaining_length, max_seq_len))
-                    remaining_length -= max_seq_len
-                sample_batch[SampleBatch.SEQ_LENS] = np.array(seq_lens)
-
             if len(sample_batch) == 0:
                 _log.info("skipping empty trajectory")
                 continue
@@ -176,15 +174,26 @@ def main(  # noqa: C901
                 assert total_reward == episode.cumulative_reward
 
             _log.info("saving trajectory...")
-            if policy_id is not None:
-                multi_agent_batch = MultiAgentBatch(
-                    {
-                        policy_id: sample_batch,
-                    },
-                    env_steps=len(sample_batch),
-                )
-                json_writer.write(multi_agent_batch)
-            else:
-                json_writer.write(sample_batch)
+            for overlap_index in range(sequence_overlap):
+                if max_seq_len is not None:
+                    start_index = overlap_index * max_seq_len // sequence_overlap
+                    remaining_length = len(sample_batch) - start_index
+                    seq_lens: List[int] = [start_index] if start_index > 0 else []
+                    while remaining_length > 0:
+                        seq_lens.append(min(remaining_length, max_seq_len))
+                        remaining_length -= max_seq_len
+                    sample_batch[SampleBatch.SEQ_LENS] = np.array(seq_lens)
+                _log.debug(f"saving with seq_lens={sample_batch[SampleBatch.SEQ_LENS]}")
+
+                if policy_id is not None:
+                    multi_agent_batch = MultiAgentBatch(
+                        {
+                            policy_id: sample_batch,
+                        },
+                        env_steps=len(sample_batch),
+                    )
+                    json_writer.write(multi_agent_batch)
+                else:
+                    json_writer.write(sample_batch)
 
     return {"mbag_config": mbag_config, "out_dir": out_dir}

@@ -49,6 +49,43 @@ from mbag.environment.types import (
 
 ACTION_MASK = "action_mask"
 PREV_OBS = "prev_obs"
+PREV_OTHER_AGENT_ACTIONS = "prev_other_agent_actions"
+
+
+class Conv3d1x1x1(nn.Module):
+    """
+    A 1x1x1 convolution layer.
+    """
+
+    bias: Optional[nn.Parameter]
+
+    def __init__(self, in_channels: int, out_channels: int):
+        super().__init__()
+
+        conv = nn.Conv3d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=1,
+        )
+        self.weight = nn.Parameter(conv.weight.data)
+        assert self.weight.size() == (out_channels, in_channels, 1, 1, 1)
+        if conv.bias is None:
+            self.bias = None
+        else:
+            self.bias = nn.Parameter(conv.bias.data)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        n, c_in, d, h, w = x.size()
+        c_out = self.weight.size()[0]
+        return (
+            F.linear(
+                x.permute(0, 2, 3, 4, 1).reshape(-1, c_in),
+                self.weight[:, :, 0, 0, 0],
+                self.bias,
+            )
+            .reshape(n, d, h, w, c_out)
+            .permute(0, 4, 1, 2, 3)
+        )
 
 
 class MbagModel(ABC, TorchModelV2):
@@ -70,6 +107,8 @@ class MbagModelConfig(TypedDict, total=False):
     """Block ID embedding size."""
     use_extra_features: bool
     """Use extra hand-designed features as input to the network."""
+    use_fc_after_embedding: bool
+    """Use a fully connected layer after the observation embedding."""
     mask_goal: bool
     """Remove goal information from observations before passing into the network."""
     mask_other_players: bool
@@ -104,12 +143,17 @@ class MbagModelConfig(TypedDict, total=False):
     """Scale the value function output by this amount."""
     use_prev_blocks: bool
     """Whether to input the last different value of each block type to the network."""
+    use_prev_action: bool
+    """Whether to input the last action taken to the network."""
+    use_prev_other_agent_action: bool
+    """Whether to input the last action taken by other agents to the network."""
 
 
 DEFAULT_CONFIG: MbagModelConfig = {
     "env_config": DEFAULT_ENV_CONFIG,
     "embedding_size": 8,
     "use_extra_features": False,
+    "use_fc_after_embedding": False,
     "mask_goal": False,
     "mask_other_players": True,
     "fake_state": False,
@@ -124,6 +168,8 @@ DEFAULT_CONFIG: MbagModelConfig = {
     "scale_obs": False,
     "vf_scale": 1.0,
     "use_prev_blocks": False,
+    "use_prev_action": False,
+    "use_prev_other_agent_action": False,
 }
 
 
@@ -168,6 +214,7 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
         self.env_config = extra_config["env_config"]
         self.embedding_size = extra_config["embedding_size"]
         self.use_extra_features = extra_config["use_extra_features"]
+        self.use_fc_after_embedding = extra_config["use_fc_after_embedding"]
         self.mask_goal = extra_config["mask_goal"]
         self.mask_other_players = extra_config["mask_other_players"]
         self.fake_state: bool = extra_config["fake_state"]
@@ -182,6 +229,12 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
         self.scale_obs = extra_config["scale_obs"]
         self.vf_scale = extra_config["vf_scale"]
         self.use_prev_blocks = extra_config["use_prev_blocks"]
+        self.use_prev_action = extra_config["use_prev_action"]
+        self.use_prev_other_agent_action = extra_config["use_prev_other_agent_action"]
+
+        self.action_mapping = torch.from_numpy(
+            MbagActionDistribution.get_action_mapping(self.env_config)
+        )
 
         self.block_id_embedding = nn.Embedding(
             num_embeddings=len(MinecraftBlocks.ID2NAME),
@@ -192,6 +245,11 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
             num_embeddings=16,
             embedding_dim=self.embedding_size,
         )
+
+        if self.use_fc_after_embedding:
+            self.fc_after_embedding = Conv3d1x1x1(
+                self._get_embedding_channels(), self.hidden_size
+            )
 
         self.vf_share_layers: bool = model_config["vf_share_layers"]
         if self.vf_share_layers:
@@ -225,7 +283,7 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
     def device(self) -> torch.device:
         return self.block_id_embedding.weight.device
 
-    def _get_in_planes(self) -> int:
+    def _get_embedding_planes(self) -> int:
         """
         Return how many "planes" of data of size embedding_size are present in the
         embedded observation.
@@ -240,9 +298,9 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
             planes += 1
         return planes
 
-    def _get_in_channels(self) -> int:
+    def _get_embedding_channels(self) -> int:
         """Get the number of channels in the embedded observation."""
-        in_channels = self._get_in_planes() * self.embedding_size
+        in_channels = self._get_embedding_planes() * self.embedding_size
         # Add inventory observation as extra input channels.
         num_players_in_inventory_obs = (
             1 if self.mask_other_players else self.env_config["num_players"]
@@ -252,7 +310,19 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
         in_channels += 1
         if self.use_extra_features:
             in_channels += 1
+        if self.use_prev_action:
+            in_channels += MbagActionDistribution.NUM_CHANNELS
+        if self.use_prev_other_agent_action:
+            in_channels += MbagActionDistribution.NUM_CHANNELS
         return in_channels
+
+    def _get_backbone_in_channels(self) -> int:
+        """Get the number of channels input to the backbone."""
+
+        if self.use_fc_after_embedding:
+            return self.hidden_size
+        else:
+            return self._get_embedding_channels()
 
     def _get_head_in_channels(self) -> int:
         """
@@ -282,7 +352,7 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
         action_head_layers: List[nn.Module] = []
         for layer_index in range(self.num_action_layers):
             action_head_layers.append(
-                nn.Conv3d(
+                Conv3d1x1x1(
                     (
                         self._get_head_in_channels()
                         if layer_index == 0
@@ -293,7 +363,6 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
                         if layer_index == self.num_action_layers - 1
                         else self.hidden_size
                     ),
-                    kernel_size=1,
                 )
             )
             if layer_index < self.num_action_layers - 1:
@@ -333,10 +402,56 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
         """
 
         return nn.Sequential(
-            nn.Conv3d(self._get_head_in_channels(), self.hidden_size, 1),
+            Conv3d1x1x1(self._get_head_in_channels(), self.hidden_size),
             nn.LeakyReLU(),
-            nn.Conv3d(self.hidden_size, MinecraftBlocks.NUM_BLOCKS, 1),
+            Conv3d1x1x1(self.hidden_size, MinecraftBlocks.NUM_BLOCKS),
         )
+
+    def _get_embedded_actions(
+        self,
+        actions: torch.Tensor,
+    ):
+        """
+        Transform a raw tensor of actions into the input for the network backbone.
+        actions can either be of shape (batch_size,) for flat actions or
+        (batch_size, 3).
+        """
+
+        batch_size = actions.size()[0]
+        width, height, depth = self.world_size
+
+        if actions.ndim == 1:
+            flat_actions = actions
+        else:
+            self.action_mapping = self.action_mapping.to(actions.device)
+            flat_actions = torch.all(
+                self.action_mapping[None, :, :] == actions[:, None, :],
+                dim=2,
+            ).nonzero()[:, 1]
+
+        # A trick that gets reasonable action embeddings by taking the gradient of each
+        # actions' probability with respect to arbitrary action distribution
+        # probabilities.
+        with torch.enable_grad():
+            dummy_probs = torch.zeros(
+                batch_size,
+                MbagActionDistribution.NUM_CHANNELS,
+                width,
+                height,
+                depth,
+                device=actions.device,
+            ).requires_grad_(True)
+            dummy_flat_probs = MbagActionDistribution.to_flat_torch(
+                self.env_config, dummy_probs
+            )
+            dummy_flat_probs[
+                torch.arange(batch_size),
+                flat_actions,
+            ].sum().backward()
+            assert dummy_probs.grad is not None
+            embedded_actions = dummy_probs.grad.permute(0, 2, 3, 4, 1)
+
+        return embedded_actions
 
     def _get_embedded_obs(
         self,
@@ -344,6 +459,8 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
         inventory_obs: torch.Tensor,
         timestep: torch.Tensor,
         prev_blocks: Optional[torch.Tensor] = None,
+        prev_actions: Optional[torch.Tensor] = None,
+        prev_other_agent_actions: Optional[torch.Tensor] = None,
         include_last_interacted: bool = True,
     ):
         """
@@ -396,6 +513,23 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
                 last_interacted[last_interacted > CURRENT_PLAYER] = CURRENT_PLAYER
             embedded_last_interacted = self.player_id_embedding(last_interacted)
             embedded_obs_pieces.append(embedded_last_interacted)
+
+        if self.use_prev_action:
+            if prev_actions is None:
+                raise ValueError(
+                    "prev_actions must be provided if use_prev_action is True"
+                )
+            embedded_prev_actions = self._get_embedded_actions(prev_actions)
+            embedded_obs_pieces.append(embedded_prev_actions)
+        if self.use_prev_other_agent_action:
+            if prev_other_agent_actions is None:
+                raise ValueError(
+                    "prev_other_agent_actions must be provided if use_prev_other_agent_action is True"
+                )
+            embedded_prev_other_agent_actions = self._get_embedded_actions(
+                prev_other_agent_actions
+            )
+            embedded_obs_pieces.append(embedded_prev_other_agent_actions)
 
         embedded_obs = torch.cat(embedded_obs_pieces, dim=-1)
 
@@ -489,12 +623,27 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
             ).flatten(end_dim=1)
             end_current_blocks = current_blocks_with_time[:, -1]
 
+        self._prev_actions: Optional[torch.Tensor] = None
+        if SampleBatch.PREV_ACTIONS in input_dict:
+            self._prev_actions = input_dict[SampleBatch.PREV_ACTIONS].to(self.device)
+        self._prev_other_agent_actions: Optional[torch.Tensor] = None
+        if PREV_OTHER_AGENT_ACTIONS in input_dict:
+            self._prev_other_agent_actions = input_dict[PREV_OTHER_AGENT_ACTIONS].to(
+                self.device
+            )
+
         self._embedded_obs = self._get_embedded_obs(
             self._world_obs,
             self._inventory_obs,
             self._timestep,
             prev_blocks,
+            self._prev_actions,
+            self._prev_other_agent_actions,
         )
+        if self.use_fc_after_embedding:
+            self._backbone_in = self.fc_after_embedding(self._embedded_obs)
+        else:
+            self._backbone_in = self._embedded_obs
 
         self._amp_or_nothing: ContextManager = contextlib.nullcontext()
         if self.device.type == "cuda" and torch.cuda.is_bf16_supported():
@@ -510,7 +659,7 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
                     and backbone.interleave_lstm
                 )
                 lstm_in = backbone(
-                    self._embedded_obs, layer_indices=range(0, self.lstm_depth)
+                    self._backbone_in, layer_indices=range(0, self.lstm_depth)
                 )
                 lstm_out, state = self._run_lstm(lstm_in, state, seq_lens)
                 num_layers: int = self.num_layers
@@ -524,10 +673,10 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
                 ):
                     assert not self.use_per_location_lstm
                     self._backbone_out, state = backbone(
-                        self._embedded_obs, state, seq_lens
+                        self._backbone_in, state, seq_lens
                     )
                 else:
-                    self._backbone_out = backbone(self._embedded_obs)
+                    self._backbone_out = backbone(self._backbone_in)
                     if self.use_per_location_lstm:
                         self._backbone_out, state = self._run_lstm(
                             self._backbone_out, state, seq_lens
@@ -579,12 +728,12 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
             if self.vf_share_layers:
                 vf = self.value_head(self._backbone_out).squeeze(1)
             else:
-                vf = self.value_head(self.value_backbone(self._embedded_obs)).squeeze(1)
+                vf = self.value_head(self.value_backbone(self._backbone_in)).squeeze(1)
         return vf.float() * self.vf_scale
 
-    def goal_predictor(self):
+    def goal_predictor(self) -> torch.Tensor:
         with self._amp_or_nothing:
-            goal_preds = self.goal_head(self._backbone_out)
+            goal_preds: torch.Tensor = self.goal_head(self._backbone_out)
         return goal_preds.float()
 
     def get_initial_state(self):
@@ -865,7 +1014,7 @@ class MbagConvolutionalModel(MbagTorchModel):
             else:
                 filter_size = self.filter_size
             if layer_index == 0:
-                in_channels = self._get_in_channels()
+                in_channels = self._get_backbone_in_channels()
             else:
                 in_channels = self.hidden_channels
 
@@ -1136,7 +1285,7 @@ class SeparatedTransformerEncoder(nn.Module):
         if isinstance(layer, nn.LSTM):
             lstm_index = layer_index // (self.n_spatial_dims + 1)
             lstm_state = state[2 * lstm_index : 2 * (lstm_index + 1)]
-            return self._run_lstm(layer, x, lstm_state, seq_lens)
+            x, state = self._run_lstm(layer, x, lstm_state, seq_lens)
         else:
             spatial_dim = layer_index % self.n_spatial_dims
             permutation = (
@@ -1163,11 +1312,17 @@ class SeparatedTransformerEncoder(nn.Module):
             else:
                 layer_output = self._batched_layer_forward(layer, layer_input)
             x = layer_output.reshape(x_permuted.size()).permute(*inverse_permutation)
-            return x, []
+            state = []
+
+        if x.device.type == "cuda" and torch.cuda.is_bf16_supported():
+            x = x.bfloat16()
+
+        return x, state
 
     def _run_lstm(
         self, lstm: nn.LSTM, x: torch.Tensor, state_in: List[torch.Tensor], seq_lens
     ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+        x = x.float()
         world_size = x.size()[2:]
         flat_x = x.flatten(start_dim=1)
         flat_backone_out_with_time: torch.Tensor = add_time_dimension(
@@ -1312,7 +1467,7 @@ class MbagTransformerModel(MbagTorchModel):
             obs_space, action_space, num_outputs, model_config, name, **kwargs
         )
 
-        assert self._get_in_channels() <= self.hidden_size
+        assert self._get_backbone_in_channels() <= self.hidden_size
 
         # Initialize positional embeddings along each dimension.
         self.position_embedding = nn.Parameter(
@@ -1342,8 +1497,8 @@ class MbagTransformerModel(MbagTorchModel):
             None, None, :
         ]
 
-    def _get_in_channels(self) -> int:
-        return super()._get_in_channels() + self.position_embedding_size
+    def _get_embedding_channels(self) -> int:
+        return super()._get_embedding_channels() + self.position_embedding_size
 
     def _get_position_embedding(self, seq_len: int, size: int) -> torch.Tensor:
         """
@@ -1398,6 +1553,8 @@ class MbagTransformerModel(MbagTorchModel):
         inventory_obs: torch.Tensor,
         timestep: torch.Tensor,
         prev_blocks: Optional[torch.Tensor] = None,
+        prev_actions: Optional[torch.Tensor] = None,
+        prev_other_agent_actions: Optional[torch.Tensor] = None,
         include_last_interacted=True,
     ):
         embedded_obs = super()._get_embedded_obs(
@@ -1405,18 +1562,22 @@ class MbagTransformerModel(MbagTorchModel):
             inventory_obs,
             timestep,
             prev_blocks,
+            prev_actions,
+            prev_other_agent_actions,
             include_last_interacted,
         )
         batch_size = embedded_obs.size()[0]
-        embedded_obs = self._pad_to_hidden_size(
-            torch.cat(
-                [
-                    embedded_obs.permute(0, 2, 3, 4, 1),
-                    self.position_embedding[None].expand(batch_size, -1, -1, -1, -1),
-                ],
-                dim=4,
-            )
-        ).permute(0, 4, 1, 2, 3)
+        embedded_obs = torch.cat(
+            [
+                embedded_obs.permute(0, 2, 3, 4, 1),
+                self.position_embedding[None].expand(batch_size, -1, -1, -1, -1),
+            ],
+            dim=4,
+        )
+        if not self.use_fc_after_embedding:
+            embedded_obs = self._pad_to_hidden_size(embedded_obs)
+
+        embedded_obs = embedded_obs.permute(0, 4, 1, 2, 3)
 
         if self.use_separated_transformer:
             return embedded_obs

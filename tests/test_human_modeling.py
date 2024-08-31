@@ -3,11 +3,13 @@ from typing import cast
 import numpy as np
 import pytest
 
-import mbag.rllib  # noqa: F401
-from mbag.rllib.alpha_zero.mcts import calculate_limiting_mcts_distribution
-from mbag.scripts.evaluate_human_modeling import HumanModelingEvaluationResults
-from mbag.scripts.evaluate_human_modeling import ex as evaluate_human_modeling_ex
-from mbag.scripts.train import ex as train_ex
+try:
+    from mbag.rllib.alpha_zero.mcts import calculate_limiting_mcts_distribution
+    from mbag.scripts.evaluate_human_modeling import HumanModelingEvaluationResults
+    from mbag.scripts.evaluate_human_modeling import ex as evaluate_human_modeling_ex
+    from mbag.scripts.train import ex as train_ex
+except ImportError:
+    pass
 
 from .test_train import default_bc_config, default_config  # noqa: F401
 
@@ -16,6 +18,7 @@ TUTORIAL_BC_CHECKPOINT = (
 )
 
 
+@pytest.mark.uses_rllib
 def test_calculate_limiting_mcts_distribution():
     priors = np.array(
         [
@@ -45,6 +48,7 @@ def test_calculate_limiting_mcts_distribution():
 
 
 @pytest.mark.uses_rllib
+@pytest.mark.slow
 @pytest.mark.timeout(30)
 def test_evaluate_human_modeling(tmp_path):
     out_dir = str(tmp_path)
@@ -65,6 +69,7 @@ def test_evaluate_human_modeling(tmp_path):
 
 
 @pytest.mark.uses_rllib
+@pytest.mark.slow
 @pytest.mark.timeout(60)
 def test_evaluate_human_modeling_pikl(
     tmp_path, default_config, default_bc_config  # noqa: F811

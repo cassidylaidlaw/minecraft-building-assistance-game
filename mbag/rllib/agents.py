@@ -13,6 +13,7 @@ from mbag.environment.actions import MbagAction, MbagActionTuple
 from mbag.environment.mbag_env import MbagConfigDict
 from mbag.environment.state import MbagStateDict
 from mbag.environment.types import MbagInfoDict, MbagObs
+from mbag.rllib.alpha_zero.alpha_zero_policy import C_PUCT, MbagAlphaZeroPolicy
 
 
 class RllibMbagAgentConfigDict(TypedDict):
@@ -32,6 +33,7 @@ class RllibMbagAgent(MbagAgent):
     agent_config: RllibMbagAgentConfigDict
     state: List[TensorType]
     last_action_time: Optional[float]
+    prev_action: MbagActionTuple
 
     def __init__(self, agent_config: MbagConfigDict, env_config: MbagConfigDict):
         super().__init__(agent_config, env_config)
@@ -48,7 +50,9 @@ class RllibMbagAgent(MbagAgent):
         super().reset(**kwargs)
 
         self.state = self.policy.get_initial_state()
+        self.c_puct: Optional[float] = None  # Used for DiL-piKL.
         self.last_action_time = None
+        self.prev_action = (0, 0, 0)
 
     def get_action(self, obs: MbagObs, *, compute_actions_kwargs={}) -> MbagActionTuple:
         force_noop = False
@@ -60,7 +64,15 @@ class RllibMbagAgent(MbagAgent):
         if not force_noop:
             self.last_action_time = time.time()
 
+        if isinstance(self.policy, MbagAlphaZeroPolicy) and self.c_puct is not None:
+            compute_actions_kwargs = {
+                **compute_actions_kwargs,
+                "prev_c_puct": np.array([self.c_puct]),
+            }
+
         obs_batch = tuple(obs_piece[None] for obs_piece in obs)
+        # preprocessor = ModelCatalog.get_preprocessor_for_space(self.policy.observation_space)
+        # obs_batch = torch.from_numpy(preprocessor.transform(obs)[None]).to(self.policy.device)
         state_batch = [state_piece[None] for state_piece in self.state]
         state_out_batch: List[TensorType]
         action_batch: Iterable[np.ndarray]
@@ -70,6 +82,7 @@ class RllibMbagAgent(MbagAgent):
                 state_batch,
                 explore=self.explore,
                 force_noop=force_noop,
+                prev_action_batch=np.array([list(self.prev_action)]),
                 **compute_actions_kwargs,
             )
         )
@@ -91,6 +104,9 @@ class RllibMbagAgent(MbagAgent):
             #     np.arange(len(normalized_probs)), p=normalized_probs
             # )[None]
 
+        if C_PUCT in compute_actions_info:
+            self.c_puct = float(compute_actions_info[C_PUCT][0])
+
         self.last_info = compute_actions_info
 
         if isinstance(action_batch, tuple):
@@ -109,10 +125,13 @@ class RllibMbagAgent(MbagAgent):
         return action
 
     def get_state(self) -> List[np.ndarray]:
-        return [np.array(state_part) for state_part in self.state]
+        return [np.array(state_part) for state_part in self.state] + [
+            np.array(self.prev_action)
+        ]
 
     def set_state(self, state: List[np.ndarray]) -> None:
-        self.state = [state_part for state_part in state]
+        self.state = [state_part for state_part in state[:-1]]
+        self.prev_action = tuple(state[-1])
 
 
 class RllibAlphaZeroAgentConfigDict(RllibMbagAgentConfigDict):

@@ -5,9 +5,6 @@ from typing import Any, Dict, Type, cast
 
 import numpy as np
 import pytest
-from ray.rllib.policy.policy import PolicySpec
-from ray.rllib.utils.typing import MultiAgentPolicyConfigDict
-from ray.tune.registry import ENV_CREATOR, _global_registry
 
 from mbag.agents.heuristic_agents import LowestBlockAgent, RandomAgent
 from mbag.agents.mbag_agent import MbagAgent
@@ -15,13 +12,22 @@ from mbag.environment.goals.simple import BasicGoalGenerator
 from mbag.environment.mbag_env import MbagConfigDict, MbagEnv
 from mbag.evaluation.evaluator import MbagEvaluator
 from mbag.evaluation.metrics import calculate_metrics
-from mbag.rllib.callbacks import MbagCallbacks
+
+try:
+    from ray.rllib.policy.policy import PolicySpec
+    from ray.rllib.utils.typing import MultiAgentPolicyConfigDict
+    from ray.tune.registry import ENV_CREATOR, _global_registry
+
+    from mbag.rllib.callbacks import MbagCallbacks
+except ImportError:
+    pass
 
 logger = logging.getLogger(__name__)
 
 
 @pytest.mark.timeout(30)
-def test_rllib_heuristic_agents():
+@pytest.mark.uses_rllib
+def test_metrics():
     from ray.rllib.algorithms.pg import PGConfig
 
     from mbag.rllib.policies import MbagAgentPolicy

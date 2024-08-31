@@ -4,8 +4,12 @@ from typing import Any, Dict, cast
 import numpy as np
 import pytest
 from numpy.testing import assert_array_equal
-from ray.rllib.policy.policy import PolicySpec
-from ray.tune.registry import ENV_CREATOR, _global_registry
+
+try:
+    from ray.rllib.policy.policy import PolicySpec
+    from ray.tune.registry import ENV_CREATOR, _global_registry
+except ImportError:
+    pass
 
 from mbag.agents.heuristic_agents import (
     ALL_HEURISTIC_AGENTS,
@@ -242,6 +246,7 @@ def test_lowest_block_agent():
 
 
 @pytest.mark.timeout(30)
+@pytest.mark.uses_rllib
 def test_rllib_heuristic_agents():
     from ray.rllib.algorithms.pg import PGConfig
     from ray.rllib.evaluate import rollout

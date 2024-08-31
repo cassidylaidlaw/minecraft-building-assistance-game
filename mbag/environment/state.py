@@ -1,4 +1,4 @@
-from typing import List, TypedDict
+from typing import List, Optional, TypedDict
 
 import numpy as np
 
@@ -51,11 +51,14 @@ def _inventory_obs_to_inventory(
     return inventory
 
 
-def mbag_obs_to_state(obs: MbagObs, player_index: int) -> MbagStateDict:
+def mbag_obs_to_state(
+    obs: MbagObs, player_index: int, *, num_players: Optional[int] = None
+) -> MbagStateDict:
     world_obs, inventory_obs, timestep = obs
     _, width, height, depth = world_obs.shape
     world_size: WorldSize = (width, height, depth)
-    num_players, _ = inventory_obs.shape
+    if num_players is None:
+        num_players, _ = inventory_obs.shape
 
     player_inventories: List[MbagInventory] = [
         np.zeros((INVENTORY_NUM_SLOTS, 2), dtype=np.int32) for _ in range(num_players)
@@ -93,6 +96,10 @@ def mbag_obs_to_state(obs: MbagObs, player_index: int) -> MbagStateDict:
         last_interacted[world_obs[LAST_INTERACTED] == player_tag + 1] = (
             other_player_index
         )
+
+    # If this observation comes from an environment with more than the specified number
+    # of players, set the last_interacted for the extra players to 0.
+    last_interacted[world_obs[LAST_INTERACTED] > num_players] = 0
 
     player_directions = [(0.0, 0.0) for _ in range(num_players)]
 

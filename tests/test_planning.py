@@ -1,15 +1,21 @@
 import copy
 
 import numpy as np
+import pytest
 
 from mbag.agents.action_distributions import MbagActionDistribution
 from mbag.agents.heuristic_agents import LowestBlockAgent
 from mbag.environment.actions import MbagAction
 from mbag.environment.blocks import MinecraftBlocks
 from mbag.environment.mbag_env import DEFAULT_CONFIG
-from mbag.rllib.alpha_zero.planning import create_mbag_env_model
+
+try:
+    from mbag.rllib.alpha_zero.planning import create_mbag_env_model
+except ImportError:
+    pass
 
 
+@pytest.mark.uses_rllib
 def test_env_model_termination():
     config = copy.deepcopy(DEFAULT_CONFIG)
     config["world_size"] = (5, 5, 5)
@@ -38,6 +44,7 @@ def test_env_model_termination():
             assert timestep == 100
 
 
+@pytest.mark.uses_rllib
 def test_get_all_rewards():
     config = copy.deepcopy(DEFAULT_CONFIG)
     config["world_size"] = (5, 5, 5)

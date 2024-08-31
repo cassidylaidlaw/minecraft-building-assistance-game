@@ -65,6 +65,7 @@ def convert_episode_to_sample_batch(  # noqa: C901
     # Keep track of any rewards received during intermediate NOOPs.
     intermediate_rewards: float = 0
     prev_action_time: Optional[datetime] = None
+    prev_action: Union[int, MbagActionTuple] = 0 if flat_actions else (0, 0, 0)
     current_time: Optional[datetime] = None
     for i in range(episode.length):
         obs = episode.obs_history[i][player_index]
@@ -142,23 +143,30 @@ def convert_episode_to_sample_batch(  # noqa: C901
                 assert prev_action_time is not None and current_time is not None
                 while current_time > prev_action_time + timedelta(seconds=action_delay):
                     prev_action_time += timedelta(seconds=action_delay)
+                    noop_action: Union[int, MbagActionTuple] = (
+                        0 if flat_actions else (0, 0, 0)
+                    )
                     sample_batch_builder.add_values(
                         **{
                             SampleBatch.T: t,
                             SampleBatch.EPS_ID: episode_id,
                             SampleBatch.AGENT_INDEX: player_index,
                             SampleBatch.OBS: obs,
-                            SampleBatch.ACTIONS: 0 if flat_actions else (0, 0, 0),
+                            SampleBatch.ACTIONS: noop_action,
+                            SampleBatch.PREV_ACTIONS: prev_action,
                             SampleBatch.ACTION_PROB: 1.0,
                             SampleBatch.ACTION_LOGP: 0.0,
                             SampleBatch.REWARDS: intermediate_rewards,
                             SampleBatch.DONES: False,
-                            SampleBatch.INFOS: {},
+                            SampleBatch.INFOS: {
+                                "timestamp": current_time,
+                            },
                             PARTICIPANT_ID: participant_id,
                             EPISODE_DIR: episode_dir,
                         }
                     )
                     intermediate_rewards = 0
+                    prev_action = noop_action
                     t += 1
                 prev_action_time = current_time
 
@@ -169,16 +177,21 @@ def convert_episode_to_sample_batch(  # noqa: C901
                     SampleBatch.AGENT_INDEX: player_index,
                     SampleBatch.OBS: obs,
                     SampleBatch.ACTIONS: action_id,
+                    SampleBatch.PREV_ACTIONS: prev_action,
                     SampleBatch.ACTION_PROB: 1.0,
                     SampleBatch.ACTION_LOGP: 0.0,
                     SampleBatch.REWARDS: intermediate_rewards,
                     SampleBatch.DONES: False,
-                    SampleBatch.INFOS: info,
+                    SampleBatch.INFOS: {
+                        **info,
+                        "timestamp": current_time,
+                    },
                     PARTICIPANT_ID: participant_id,
                     EPISODE_DIR: episode_dir,
                 }
             )
             intermediate_rewards = 0
+            prev_action = action_id
             t += 1
     return sample_batch_builder.build_and_reset()
 

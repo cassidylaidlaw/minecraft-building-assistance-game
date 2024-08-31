@@ -3,7 +3,7 @@ import random
 from typing import cast
 
 import numpy as np
-from ray.rllib.evaluation import SampleBatch
+import pytest
 
 from mbag.agents.action_distributions import MbagActionDistribution
 from mbag.environment.actions import MbagActionTuple
@@ -11,9 +11,16 @@ from mbag.environment.blocks import MinecraftBlocks
 from mbag.environment.mbag_env import MbagEnv
 from mbag.environment.state import mbag_obs_to_state
 from mbag.environment.types import MbagObs
-from mbag.rllib.data_augmentation import randomly_permute_block_types
+
+try:
+    from ray.rllib.evaluation import SampleBatch
+
+    from mbag.rllib.data_augmentation import randomly_permute_block_types
+except ImportError:
+    pass
 
 
+@pytest.mark.uses_rllib
 def test_randomly_permute_block_types():
     for (
         teleportation,

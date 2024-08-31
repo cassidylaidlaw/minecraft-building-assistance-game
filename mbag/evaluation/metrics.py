@@ -44,9 +44,20 @@ class MbagEpisodeMetrics(TypedDict):
 
 def get_rounded_minutes(episode: MbagEpisode, t: int) -> int:
     info_dict = episode.info_history[min(t, episode.length - 1)][0]
-    if episode.env_config["malmo"]["use_malmo"] and t < episode.length:
+    if episode.env_config["malmo"]["use_malmo"]:
         start_time = episode.info_history[0][0]["timestamp"]
-        total_seconds = (info_dict["timestamp"] - start_time).total_seconds()
+        if t < episode.length:
+            total_seconds = (info_dict["timestamp"] - start_time).total_seconds()
+        else:
+            end_time = episode.info_history[-1][0]["timestamp"]
+            episode_seconds = (end_time - start_time).total_seconds()
+            horizon_seconds = (
+                episode.env_config["horizon"]
+                * episode.env_config["malmo"]["action_delay"]
+            )
+            total_seconds = episode_seconds + (t - episode.length) / (
+                episode.env_config["horizon"] - episode.length
+            ) * (horizon_seconds - episode_seconds)
     else:
         total_seconds = (t + 1) * episode.env_config["malmo"]["action_delay"]
     return int(total_seconds // 60)

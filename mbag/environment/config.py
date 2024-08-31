@@ -68,6 +68,12 @@ class RewardsConfigDict(TypedDict, total=False):
     introduce some cost for acting.
     """
 
+    incorrect_action: RewardSchedule
+    """
+    The reward for taking a place/break action which is not correct. This is usually
+    negative to discourage incorrect actions.
+    """
+
     place_wrong: RewardSchedule
     """
     The reward for placing a block which is not correct, but in a place where a block
@@ -258,6 +264,7 @@ DEFAULT_CONFIG: MbagConfigDict = {
     "rewards": {
         "noop": 0.0,
         "action": 0.0,
+        "incorrect_action": 0.0,
         "place_wrong": 0.0,
         "own_reward_prop": 0.0,
         "get_resources": 0,

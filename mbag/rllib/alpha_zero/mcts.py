@@ -67,6 +67,7 @@ class MbagMCTSNode:
         mcts: "MbagMCTS",
         model_state_in: Union[List[np.ndarray], List[torch.Tensor]],
         parent: Union["MbagMCTSNode", MbagRootParentNode],
+        c_puct: float = np.nan,
     ):
         self.env = parent.env
         self.action = action  # Action used to go to this state
@@ -86,9 +87,11 @@ class MbagMCTSNode:
         if isinstance(self.parent, MbagRootParentNode):
             if isinstance(self.mcts.c_puct, numbers.Real):
                 self.c_puct = self.mcts.c_puct
-            else:
+            elif self.mcts.sample_c_puct_every_timestep or np.isnan(c_puct):
                 # Implement DiL-piKL by randomly choosing a c_puct value from the list.
                 self.c_puct = np.random.choice(self.mcts.c_puct)
+            else:
+                self.c_puct = c_puct
         else:
             self.c_puct = self.parent.c_puct
 
@@ -650,6 +653,22 @@ class MbagMCTS(MCTS):
         # than the action type. We keep this option around to reproduce old results.
         self.fix_bilevel_action_selection = mcts_param.get(
             "fix_bilevel_action_selection", False
+        )
+
+        self.sample_c_puct_every_timestep: bool = mcts_param.get(
+            "sample_c_puct_every_timestep", True
+        )
+
+    @property
+    def persist_c_puct(self):
+        """
+        Returns True if c_puct needs to be stored in the policy's state across
+        timesteps. This is only the case if there are multiple c_puct values
+        (as in DiL-piKL) and sample_c_puct_every_timestep is False.
+        """
+
+        return not self.sample_c_puct_every_timestep and isinstance(
+            self.c_puct, Sequence
         )
 
     def update_temperature(self, global_timestep: int):

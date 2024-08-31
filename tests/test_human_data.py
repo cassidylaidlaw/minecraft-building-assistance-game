@@ -4,30 +4,35 @@ from typing import cast
 
 import numpy as np
 import pytest
-from ray.rllib.env.multi_agent_env import MultiAgentEnv
-from ray.rllib.offline import JsonReader
-from ray.rllib.policy.sample_batch import SampleBatch
-from ray.tune.registry import ENV_CREATOR, _global_registry
 
-import mbag.rllib  # noqa: F401
 from mbag.environment.actions import MbagAction
 from mbag.environment.mbag_env import MbagConfigDict
 from mbag.environment.types import CURRENT_PLAYER, NO_ONE, PLAYER_LOCATIONS
-from mbag.rllib.human_data import (
-    PARTICIPANT_ID,
-    convert_episode_to_sample_batch,
-    load_episode,
-    repair_missing_player_locations,
-)
-from mbag.scripts.convert_human_data_to_rllib import (
-    ex as convert_human_data_to_rllib_ex,
-)
+
+try:
+    from ray.rllib.env.multi_agent_env import MultiAgentEnv
+    from ray.rllib.offline import JsonReader
+    from ray.rllib.policy.sample_batch import SampleBatch
+    from ray.tune.registry import ENV_CREATOR, _global_registry
+
+    from mbag.rllib.human_data import (
+        PARTICIPANT_ID,
+        convert_episode_to_sample_batch,
+        load_episode,
+        repair_missing_player_locations,
+    )
+    from mbag.scripts.convert_human_data_to_rllib import (
+        ex as convert_human_data_to_rllib_ex,
+    )
+except ImportError:
+    pass
 
 TUTORIAL_BC_CHECKPOINT = (
     "data/logs/BC/sample_human_models/tutorial/2024-04-10_16-35-41/1/checkpoint_000100"
 )
 
 
+@pytest.mark.uses_rllib
 def test_convert_episode_to_sample_batch():
     episode = load_episode(
         "data/human_data/sample_tutorial/participant_1/2023-07-18_15-41-19/1/episode.zip"
@@ -124,6 +129,7 @@ def test_convert_episode_to_sample_batch():
 
 
 @pytest.mark.timeout(120)
+@pytest.mark.uses_rllib
 def test_repair_missing_player_locations():
     episode = load_episode(
         "data/human_data/sample_tutorial/participant_1/2023-07-18_15-41-19/1/episode.zip"
@@ -146,6 +152,7 @@ def test_repair_missing_player_locations():
 
 
 @pytest.mark.timeout(120)
+@pytest.mark.uses_rllib
 def test_convert_human_data_consistency_with_rllib_env(tmp_path):
     for flat_actions, env_id in [
         (False, "MBAG-v1"),
@@ -203,6 +210,7 @@ def test_convert_human_data_consistency_with_rllib_env(tmp_path):
 
 
 @pytest.mark.timeout(120)
+@pytest.mark.uses_rllib
 def test_convert_human_data_to_rllib_participant_id(tmp_path):
     out_dir = str(tmp_path / "rllib")
     convert_human_data_to_rllib_ex.run(

@@ -10,6 +10,7 @@ from mbag.environment.actions import MbagAction, MbagActionTuple
 from mbag.environment.blocks import MinecraftBlocks
 from mbag.environment.goals import TransformedGoalGenerator
 from mbag.environment.mbag_env import DEFAULT_CONFIG, MbagEnv
+from mbag.environment.types import CURRENT_BLOCKS
 from mbag.evaluation.evaluator import MbagEvaluator
 
 
@@ -74,7 +75,7 @@ def test_deterministic():
 def test_goal_similarity_and_goal_percentage():
     for place_wrong_reward in [0, -1]:
         num_players = 1
-        for goal_generator in ["basic", "random", "simple_overhang", "grabcraft"]:
+        for goal_generator in ["basic", "simple_overhang", "grabcraft"]:
             if goal_generator != "grabcraft":
                 transforms = []
             else:
@@ -187,3 +188,83 @@ def test_truncate_on_no_progress():
             assert done
         else:
             assert not done
+
+
+def test_incorrect_action_reward():
+    for incorrect_action_reward in [0, -0.5]:
+        env = MbagEnv(
+            {
+                "goal_generator": "basic",
+                "horizon": 100,
+                "abilities": {
+                    "teleportation": True,
+                    "flying": True,
+                    "inf_blocks": False,
+                },
+                "rewards": {
+                    "place_wrong": -1,
+                    "incorrect_action": incorrect_action_reward,
+                },
+                "world_size": (5, 5, 5),
+            }
+        )
+        (obs,), (info,) = env.reset()
+        world_obs, _, _ = obs
+
+        # Incorrect break action.
+        x, y, z = 2, 1, 0
+        action = (
+            MbagAction.BREAK_BLOCK,
+            int(np.ravel_multi_index((x, y, z), env.config["world_size"])),
+            0,
+        )
+        _, (reward,), _, (info,) = env.step([action])
+        assert reward == -1 + incorrect_action_reward
+        assert not info["action_correct"]
+
+        # Correct break action.
+        x, y, z = 2, 1, 2
+        action = (
+            MbagAction.BREAK_BLOCK,
+            int(np.ravel_multi_index((x, y, z), env.config["world_size"])),
+            0,
+        )
+        _, (reward,), _, (info,) = env.step([action])
+        assert reward == 1
+        assert info["action_correct"]
+
+        # Palette action.
+        cobblestone = MinecraftBlocks.NAME2ID["cobblestone"]
+        palette_blocks = world_obs[CURRENT_BLOCKS, env.palette_x, 2, :]
+        x, y, z = env.palette_x, 2, np.nonzero(palette_blocks == cobblestone)[0][0]
+        action = (
+            MbagAction.BREAK_BLOCK,
+            int(np.ravel_multi_index((x, y, z), env.config["world_size"])),
+            0,
+        )
+        _, (reward,), _, _ = env.step([action])
+        assert reward == 0
+        _, (reward,), _, _ = env.step([action])
+        assert reward == 0
+
+        # Incorrect place action.
+        x, y, z = 2, 1, 0
+        action = (
+            MbagAction.PLACE_BLOCK,
+            int(np.ravel_multi_index((x, y, z), env.config["world_size"])),
+            cobblestone,
+        )
+        _, (reward,), _, (info,) = env.step([action])
+        assert reward == -1 + incorrect_action_reward
+        assert not info["action_correct"]
+
+        # Correct place action.
+        x, y, z = 2, 1, 2
+        action = (
+            MbagAction.PLACE_BLOCK,
+            int(np.ravel_multi_index((x, y, z), env.config["world_size"])),
+            cobblestone,
+        )
+        _, (reward,), _, (info,) = env.step([action])
+        assert reward == 1
+        assert info["action_correct"]

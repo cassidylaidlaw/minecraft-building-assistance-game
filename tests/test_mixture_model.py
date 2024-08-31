@@ -1,16 +1,23 @@
 from typing import Any, List, cast
 
 import numpy as np
-import torch
-from ray.rllib.models.catalog import ModelCatalog
-from ray.rllib.policy.sample_batch import SampleBatch
+import pytest
 
 from mbag.agents.action_distributions import MbagActionDistribution
 from mbag.environment import MbagEnv
 from mbag.environment.types import MbagObs
-from mbag.rllib.mixture_model import MixtureModel
+
+try:
+    import torch
+    from ray.rllib.models.catalog import ModelCatalog
+    from ray.rllib.policy.sample_batch import SampleBatch
+
+    from mbag.rllib.mixture_model import MixtureModel
+except ImportError:
+    pass
 
 
+@pytest.mark.uses_rllib
 def test_mixture_model(*, recurrent=False):
     env = MbagEnv(
         {
@@ -242,5 +249,6 @@ def test_mixture_model(*, recurrent=False):
             )
 
 
+@pytest.mark.uses_rllib
 def test_mixture_model_recurrent():
     test_mixture_model(recurrent=True)

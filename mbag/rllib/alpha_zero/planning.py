@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Sequence, Union, cast
+from typing import Dict, List, Optional, Sequence, Tuple, Union, cast
 
 import gymnasium as gym
 import numpy as np
@@ -72,7 +72,7 @@ class MbagEnvModel(gym.Env):
     def _store_last_obs_dict(self, obs_dict):
         self.last_obs_dict = obs_dict
 
-    def reset(self):
+    def reset(self, *, seed=None, options=None):
         obs_dict, info_dict = self.env.reset()
         self._store_last_obs_dict(obs_dict)
         return cast(MbagObs, obs_dict[self.agent_id]), cast(
@@ -180,10 +180,12 @@ class MbagEnvModel(gym.Env):
             self._store_last_obs_dict(obs_dict)
             return obs_dict[self.agent_id]
 
-    def set_state_from_obs(self, obs: MbagObs) -> MbagStateDict:
-        state = mbag_obs_to_state(obs, self.player_index)
-        self.set_state(state)
-        return state
+    def set_state_from_obs(self, obs: MbagObs) -> Tuple[MbagStateDict, MbagObs]:
+        state = mbag_obs_to_state(
+            obs, self.player_index, num_players=self.config["num_players"]
+        )
+        obs = self.set_state(state)
+        return state, obs
 
     def get_reward_with_other_agent_actions(
         self,
@@ -300,6 +302,13 @@ class MbagEnvModel(gym.Env):
             reward = float(
                 np.sum((new_similarity - prev_similarity) * goal_block_id_dist)
             )
+
+            correct = new_similarity > prev_similarity
+            reward += env._get_reward(
+                player_index,
+                "incorrect_action",
+                env.global_timestep,
+            ) * float(np.sum(~correct * goal_block_id_dist))
 
         return reward
 

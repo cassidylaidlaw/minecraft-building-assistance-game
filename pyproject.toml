@@ -1,3 +1,76 @@
+[build-system]
+requires = ["setuptools", "numpy>=1.21,<1.22"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "minecraft-building-assistance-game"
+version = "0.0.1"
+description = 'Minecraft Building Assistance Game'
+authors = [
+    {name = "Cassidy Laidlaw", email = "cassidy_laidlaw@berkeley.edu"},
+]
+dynamic = ["readme"]
+dependencies = [
+    "numpy>=1.21,<1.22",
+    "connected-components-3d==3.12.3",
+    "types-PyYAML==5.4.3",
+    "gymnasium>=0.28",
+    "scikit-image>=0.21",
+]
+requires-python = ">= 3.8"
+classifiers=[
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+]
+
+[project.urls]
+Homepage = "https://github.com/cassidylaidlaw/effective-horizon"
+
+[tool.setuptools.dynamic]
+readme = {file=["README.md"], content-type="text/markdown"}
+
+[tool.setuptools]
+packages = [
+    "mbag",
+    "mbag.environment",
+    "mbag.environment.goals",
+    "mbag.environment.malmo",
+    "mbag.agents",
+    "mbag.evaluation",
+    "mbag.rllib",
+    "mbag.rllib.alpha_zero",
+    "mbag.scripts",
+]
+
+[project.optional-dependencies]
+dev = [
+    "flake8",
+    "black",
+    "mypy",
+    "pytest",
+    "pytest-timeout",
+    "memray<1.12",
+    "pytest-memray",
+    "pep8-naming",
+    "isort",
+    "types-psutil",
+]
+rllib = [
+    "ray[rllib]==2.7.1",
+    "torch>=1.8",
+    "sacred==0.8.4",
+    "tqdm",
+]
+malmo = [
+    "mbag-malmo>=0.38.0",
+]
+
 [tool.black]
 line-length = 88
 target-version = ['py38']
@@ -7,9 +80,35 @@ exclude = ''
 [tool.pytest.ini_options]
 timeout = 10
 testpaths = ["tests"]
-markers = ["uses_rllib", "uses_cuda", "uses_malmo"]
+markers = ["slow", "uses_rllib", "uses_cuda", "uses_malmo", "uses_sacred"]
 
 [tool.isort]
 profile = "black"
 known_first_party = ["mbag"]
 known_third_party = ["ray", "torch"]
+
+[tool.mypy]
+python_version = 3.8
+warn_return_any = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unused_configs = true
+check_untyped_defs = true
+mypy_path = "."
+
+[[tool.mypy.overrides]]
+module = [
+    "MalmoPython.*",
+    "sacred.*",
+    "cc3d.*",
+    "cloudpickle.*",
+    "tqdm.*",
+    "scipy.*",
+    "malmo.*",
+    "skimage.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "ray.rllib.evaluation.sampler"
+follow_imports = "skip"

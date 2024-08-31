@@ -328,7 +328,8 @@ class MbagPPO(PPO, KLRegularizationMixin):
     def get_default_config(cls):
         return MbagPPOConfig()
 
-    def get_default_policy_class(self, config):
+    @classmethod
+    def get_default_policy_class(cls, config):
         return MbagPPOTorchPolicy
 
     def training_step(self) -> ResultDict:

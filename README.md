@@ -10,68 +10,51 @@ This section describes how to set up your development environment.
 
 ### Installing dependencies
 
-First, install Python (≥3.8 tested but lower might work; if you are running Linux we recommend using Python 3.8). Then, run
+First, install Python 3.8, 3.9, or 3.10. Then, run one of the following commmands:
 
-    pip install -r requirements.txt
-
-to install all other dependencies.
+  * Install just the environment: `pip install -e .`
+  * Also install the RLlib dependencies for training and running assistants: `pip install -e .[rllib]`
+  * Also install the Malmo interface to run assistants in Minecraft: `pip install -e .[rllib,malmo]`
 
 ### Linting, testing, and type checking
 
 The project uses various tools to maintain code quality. To install them all, run
 
-    pip install --upgrade -r requirements_dev.txt
+    pip install --upgrade -e .[dev]
 
-Then, you can run the following commands:
- * `black mbag tests`: automatic formatting with [Black](https://black.readthedocs.io/en/stable/).
- * `isort mbag tests`: automatic import sorting with [isort](https://pycqa.github.io/isort/index.html).
- * `flake8 mbag tests`: linting with [Flake8](https://flake8.pycqa.org/en/latest/).
- * `mypy mbag tests`: type checking with [MyPy](http://mypy-lang.org/).
-    * *Note:* due to this [bug](https://github.com/ray-project/ray/issues/14431), on Linux you may have to run `touch /path/to/site-packages/ray/py.typed`, replacing `/path/to/site-packages` depending on where python is installed, to make type checking work.
- * `pytest`: run tests with [PyTest](https://docs.pytest.org/en/6.2.x/).
+Then, run linting and testing with the following commands:
 
-### Integration with Minecraft via Project Malmo
+    ./lint.sh
+    pytest -m "not uses_malmo"
 
-The MBAG environment is implemented using a highly simplified Minecraft simulator that can run much, much faster than Minecraft itself. However, it can also connect to running Minecraft instances for interaction with human players via [Project Malmo](https://github.com/microsoft/malmo). The following steps describe how to set up the Minecraft interface. *Note: it can be somewhat difficult to build Malmo; reach out to [Cassidy](mailto:cassidy_laidlaw@berkeley.edu) with any issues.*
+To run fewer tests, you can some or all of these additional filters:
 
- 1. Follow the Project Malmo build instructions for [Linux](https://github.com/microsoft/malmo/blob/master/doc/build_linux.md), [macOS](https://github.com/microsoft/malmo/blob/master/doc/build_macosx.md), or [Windows](https://github.com/microsoft/malmo/blob/master/doc/build_windows.md). **Stop before you run `make install`.**
- 2. Instead of running `make install`, just run `make MalmoPython`.
- 3. Run the following command to install the Malmo python package:
-    
-        ln -s `pwd`/Malmo/src/PythonWrapper/MalmoPython.so `python -c 'import site; print(site.getsitepackages()[0])'`
+    pytest -m "not uses_malmo and not slow"
+    pytest -m "not uses_malmo and not uses_rllib"
+    pytest -m "not uses_malmo and not uses_cuda"
 
-Now, whenever you want to interface with Minecraft from the MBAG environment, follow these steps:
+## Running assistants in Minecraft
 
- 1. `cd` to the directory where you installed Malmo and then `cd` to the `Minecraft` subdirectory.
- 2. Make sure `JAVA_HOME` is set for Java 8, which you should have installed while building Malmo.
- 3. Run `./launchClient.sh`, once for MBAG player (i.e., run one instance for one player, two instances for two players, etc.). This should open a window running Minecraft.
- 4. Once Minecraft is running, use a seperate terminal tab to run MBAG with `use_malmo` set to `True` in the configuration and it should automatically connect to the Minecraft instances. For instance, running the following test should connect to a single Minecraft instance and do some basic block breaking and placing:
+Playing with assistants in Minecraft and/or collecting data of humans playing takes two steps: first, starting Minecraft instances, and second, connecting to those instances to run an episode within the MBAG environment.
 
-        pytest tests/test_evaluator.py -k test_malmo
- 5. For debugging purposes, it can be useful to take control of the player while the MBAG is controlling it. To do so, press `Return` in the Minecraft window. Pressing `Return` again will give control back to MBAG.
+### Starting Minecraft
 
-## Package layout
+To start Minecraft instances, run the following command, assuming you've installed the Malmo dependencies (see [setup](#setup)):
 
-This section describes the layout and contents of the various Python packages.
+    python -m malmo.minecraft launch --num_instances 2 --goal_visibility True False
 
- * `mbag.environment`: contains modules implementing the core MBAG environment.
-    * `.mbag_env`: contains `MbagEnv`, which implements the core environment with a [Gym](https://gym.openai.com/)-like interface.
-    * `.types`: contains various useful type definitions and a wrapper class for actions.
-    * `.blocks`: contains the `MinecraftBlocks` class, which provides various methods for interfacing with a 3d grid of Minecraft blocks.
-    * `.malmo`: contains the `MalmoClient` class, which allows for easy interfacing with Minecraft through Project Malmo.
-    * `.goals`: contains modules with various "goal generators," which provide ways of generating goal structures for an agent to build.
-       * `.goal_generator`: defines the `GoalGenerator` abstract base class.
-       * `.simple`: very basic goal generators (e.g., random blocks).
-       * `.craftassist`: houses from the [CraftAssist house dataset](https://github.com/facebookresearch/craftassist#datasets).
-       * `.grabcraft`: houses scraped from [GrabCraft](https://www.grabcraft.com/).
- * `mbag.agents`: defines agents which interact in the MBAG environment.
-    * `.mbag_agent`: defines the `MbagAgent` abstract base class.
-    * `.heuristic_agents`: defines basic heuristic-based agents.
- * `mbag.evaluation.evaluator`: defines the `MbagEvaluator` class, which allows one to test a set of agents in an MBAG environment.
- * `mbag.rllib`: modules and scripts for training MBAG policies using reinforcement learning with [RLlib](https://www.ray.io/rllib).
+Set the number of Minecraft instances to launch with the `--num_instances` option. You need at least two instances to play with an assistant (one for the human and one for the AI assistant); if you want to record video of the game, start an additional instance for a "spectator" player.
 
-Tests are contained in the `tests` directory.
+The `--goal_visibility` argument controls which instances show the goal house as a transparent blueprint within the game. Generally you should set this to True for the first instances and False for additional instances (e.g., `--goal_visibility True False False` for three instances).
 
-## Training agents with RL
+### Running an MBAG episode
 
-*Coming soon!*
+Once the Minecraft instances are running, you can use the following command to start an episode playing with an assistant:
+
+    python -m mbag.scripts.evaluate with human_with_assistant assistant_checkpoint=data/example_assistant/checkpoint_000100
+
+To play an episode without an assistant, run:
+
+    python -m mbag.scripts.evaluate with human_alone assistant_checkpoint=data/example_assistant/checkpoint_000100
+
+The `assistant_checkpoint` argument is still needed in this case to load the environment configuration. The episode will automatically terminate when the house is completed, but if you want to end it sooner, use Ctrl+C. At the end of the episode, the episode data will be saved and metrics will be printed out.

@@ -1,0 +1,108 @@
+name: Test README commands
+
+on:
+  push:
+    branches:
+      - '**'
+
+jobs:
+  test_readme:
+    name: Test commands in the README
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-20.04]
+        python_version: ['3.9']
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Install Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python_version }}
+        
+      - uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '8'
+
+      - name: Cache pip
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip # This path is specific to Ubuntu
+          # Look to see if there is a cache hit for the corresponding requirements file
+          key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Cache gradle
+        uses: actions/cache@v3
+        with:
+          path: ~/.gradle/caches
+          key: ${{ runner.os }}-gradle-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Install xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb x11-xserver-utils
+
+      - name: Make test_command.sh script
+        run: |
+          cat <<EOF > test_command.sh
+          #!/bin/bash
+
+          # Run the command in the background
+          echo "\$@"
+          "\$@" &
+          CMD_PID=\$!
+
+          # Wait for 60 seconds
+          sleep 60 & 
+          SLEEP_PID=\$!
+          wait \$SLEEP_PID
+
+          # Check if the command is still running
+          if kill -0 \$CMD_PID 2>/dev/null; then
+              # Command is still running, terminate it
+              kill \$CMD_PID
+              wait \$CMD_PID # Capture the exit code of the command
+              EXIT_CODE=\$?
+              echo "Command terminated after 60 seconds."
+              exit 0
+          else
+              # Command has finished, capture its exit code
+              wait \$CMD_PID
+              EXIT_CODE=\$?
+              if [ \$EXIT_CODE -eq 0 ]; then
+                  echo "Command completed successfully within 60 seconds."
+                  exit 0
+              else
+                  echo "Command failed with exit code \$EXIT_CODE."
+                  exit \$EXIT_CODE
+              fi
+          fi
+          EOF
+          chmod +x test_command.sh
+
+      - name: Installation
+        run: |
+          pip install -e .[rllib,malmo]
+          
+      - name: Running assistants in Minecraft
+        run: |
+          xvfb-run --auto-servernum --server-args="-screen 0 1024x768x24" python -m malmo.minecraft launch --num_instances 2 --goal_visibility True False &
+          MC_PID=$!
+
+          while ! netstat -tna | grep 'LISTEN\>' | grep -q ':'$((10001))'\>'; do
+            sleep 1
+          done
+
+          ./test_command.sh python -m mbag.scripts.evaluate with human_with_assistant assistant_checkpoint=data/example_assistant/checkpoint_000100
+
+          ./test_command.sh python -m mbag.scripts.evaluate with human_alone assistant_checkpoint=data/example_assistant/checkpoint_000100
+
+          kill $MC_PID

@@ -461,6 +461,7 @@ class MbagEnv(object):
                 and action.block_location[0] == self.palette_x
                 and not self.config["abilities"]["inf_blocks"]
             ):
+                # Palette block was broken.
                 # TODO: shouldn't we check if the user actually broke the block?
                 # might be worth adding a test to make sure the reward only comes
                 # through if they did
@@ -474,6 +475,7 @@ class MbagEnv(object):
                     player_index, "get_resources", self.global_timestep
                 )
             else:
+                # Non-palette block was placed or broken.
                 new_block = self.current_blocks[action.block_location]
                 goal_block = self.goal_blocks[action.block_location]
                 prev_goal_similarity = self._get_goal_similarity(
@@ -496,6 +498,10 @@ class MbagEnv(object):
                     action.action_type == MbagAction.BREAK_BLOCK
                     and goal_dependent_reward >= 0
                 )
+                if not action_correct:
+                    goal_dependent_reward += self._get_reward(
+                        player_index, "incorrect_action", self.global_timestep
+                    )
         elif (
             action.action_type in MbagAction.MOVE_ACTION_TYPES
             and not self.config["abilities"]["teleportation"]
@@ -1225,6 +1231,27 @@ class MbagEnv(object):
             raise RuntimeError(
                 "Environment state does not include the information necessary "
                 "to implement truncate_on_no_progress_timesteps=True."
+            )
+
+        if len(state["player_locations"]) != self.config["num_players"]:
+            raise ValueError(
+                f"player_locations has length {len(state['player_locations'])} "
+                f"but expected {self.config['num_players']}"
+            )
+        if len(state["player_directions"]) != self.config["num_players"]:
+            raise ValueError(
+                f"player_directions has length {len(state['player_directions'])} "
+                f"but expected {self.config['num_players']}"
+            )
+        if len(state["player_inventories"]) != self.config["num_players"]:
+            raise ValueError(
+                f"player_inventories has length {len(state['player_inventories'])} "
+                f"but expected {self.config['num_players']}"
+            )
+        if state["last_interacted"].max() >= self.config["num_players"]:
+            raise ValueError(
+                f"last_interacted has maximum value {state['last_interacted'].max()} "
+                f"but expected at most {self.config['num_players'] - 1}"
             )
 
         self.current_blocks = state["current_blocks"].copy()

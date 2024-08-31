@@ -6,12 +6,7 @@ These are mostly copied from ray.rllib.utils.schedules, but with minor changes:
 """
 
 from abc import ABCMeta, abstractmethod
-from typing import Callable, List, Optional, Tuple, Union
-
-import numpy as np
-import torch
-
-TensorType = Union[np.ndarray, torch.Tensor]
+from typing import Callable, List, Optional, Tuple
 
 
 class Schedule(metaclass=ABCMeta):
@@ -30,7 +25,7 @@ class Schedule(metaclass=ABCMeta):
     value and returns the value dependent on the Schedule and the passed time.
     """
 
-    def value(self, t: Union[int, TensorType]) -> float:
+    def value(self, t: int) -> float:
         """Generates the value given a timestep (based on schedule's logic).
 
         Args:
@@ -41,12 +36,12 @@ class Schedule(metaclass=ABCMeta):
         """
         return self._value(t)
 
-    def __call__(self, t: Union[int, TensorType]) -> float:
+    def __call__(self, t: int) -> float:
         """Simply calls self.value(t). Implemented to make Schedules callable."""
         return self.value(t)
 
     @abstractmethod
-    def _value(self, t: Union[int, TensorType]) -> float:
+    def _value(self, t: int) -> float:
         """
         Returns the value based on a time step input.
 
@@ -71,7 +66,7 @@ class ConstantSchedule(Schedule):
         super().__init__()
         self._v = value
 
-    def _value(self, t: Union[int, TensorType]) -> float:
+    def _value(self, t: int) -> float:
         return self._v
 
 
@@ -87,11 +82,11 @@ class PiecewiseSchedule(Schedule):
         endpoints: List[Tuple[int, float]],
         interpolation: Callable[
             [
-                Union[float, TensorType],
-                Union[float, TensorType],
-                Union[float, TensorType],
+                float,
+                float,
+                float,
             ],
-            Union[float, TensorType],
+            float,
         ] = _linear_interpolation,
         outside_value: Optional[float] = None,
     ):
@@ -125,7 +120,7 @@ class PiecewiseSchedule(Schedule):
         self.outside_value = outside_value
         self.endpoints = [(int(e[0]), float(e[1])) for e in endpoints]
 
-    def _value(self, t: Union[int, TensorType]) -> float:
+    def _value(self, t: int) -> float:
         # Find t in our list of endpoints.
         for (l_t, l), (r_t, r) in zip(self.endpoints[:-1], self.endpoints[1:]):
             # When found, return an interpolation (default: linear).

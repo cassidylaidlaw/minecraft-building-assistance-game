@@ -1,8 +1,14 @@
-from sacred.config.custom_containers import DogmaticDict, DogmaticList
+import pytest
 
-from mbag.rllib.sacred_utils import convert_dogmatics_to_standard
+try:
+    from sacred.config.custom_containers import DogmaticDict, DogmaticList
+
+    from mbag.rllib.sacred_utils import convert_dogmatics_to_standard
+except ImportError:
+    pass
 
 
+@pytest.mark.uses_sacred
 def test_dogmatic_dict_conversion():
     dogmatic_dict = DogmaticDict()
     dogmatic_dict["key"] = "value"
@@ -11,6 +17,7 @@ def test_dogmatic_dict_conversion():
     assert converted == {"key": "value"}
 
 
+@pytest.mark.uses_sacred
 def test_dogmatic_list_conversion():
     dogmatic_list = DogmaticList(["item1", "item2"])
     converted = convert_dogmatics_to_standard(dogmatic_list)
@@ -18,6 +25,7 @@ def test_dogmatic_list_conversion():
     assert converted == ["item1", "item2"]
 
 
+@pytest.mark.uses_sacred
 def test_standard_objects():
     data = {
         "list": [1, 2, 3],
@@ -29,6 +37,7 @@ def test_standard_objects():
     assert converted == data
 
 
+@pytest.mark.uses_sacred
 def test_nested_combinations():
     dogmatic_dict = DogmaticDict()
     dogmatic_dict["inner_key"] = "value"

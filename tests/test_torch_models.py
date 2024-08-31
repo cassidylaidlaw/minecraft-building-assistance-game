@@ -1,10 +1,15 @@
 import pytest
-import torch
 
-from mbag.rllib.torch_models import SeparatedTransformerEncoder
+try:
+    import torch
+
+    from mbag.rllib.torch_models import SeparatedTransformerEncoder
+except ImportError:
+    pass
 
 
 @pytest.mark.uses_cuda
+@pytest.mark.uses_rllib
 def test_separated_transformer_batch_size():
     encoder = SeparatedTransformerEncoder(
         num_layers=3,
