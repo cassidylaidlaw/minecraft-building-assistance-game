@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from mbag.environment.config import ScheduleConfig
+from mbag.environment.config import RewardScheduleEndpoints
 
 ROOT_DIR = "/nas/ucb/ebronstein/minecraft-building-assistance-game"
 ALL_DATA_SPLITS = ["combined", "human_alone", "human_with_assistant"]
@@ -115,13 +115,13 @@ DEFAULT_HUMAN_MCTS_CONFIG = dict(
 
 DEFAULT_ASSISTANT_ALPHAZERO_ENV_VARS = dict(
     INF_BLOCKS=True,
-    HORIZON=500,
+    HORIZON=1500,
     BATCH_MODE="truncate_episodes",
     RANDOMIZE_FIRST_EPISODE_LENGTH=True,
     NUM_ENVS_PER_WORKER=8,
     NUM_WORKERS=8,
     VF_SCALE=1,
-    NUM_GPUS_PER_WORKER=0.1,
+    NUM_GPUS_PER_WORKER=0.08,
     REPLAY_BUFFER_SIZE=20,
     USE_REPLAY_BUFFER=True,
     GAMMA=0.95,
@@ -422,6 +422,24 @@ def make_common_tag(env_vars: dict, algorithm: Algorithm, agent: Agent) -> str:
         elif human_action_reward != 0 or assistant_action_reward != 0:
             tag += f"/per_player_action_reward_{human_action_reward}_{assistant_action_reward}"
 
+    # Goal predictor
+    if env_vars.get("USE_GOAL_PREDICTOR"):
+        tag += f"/prev_goal_kl_{env_vars['PREV_GOAL_KL_COEFF']}"
+        # Loss term coefficients that affect pretraining and relate to goal prediction.
+        for loss_name in [
+            "GOAL_LOSS_COEFF",
+        ]:
+            loss_coeff = env_vars[loss_name]
+            tag += f"/{loss_name.lower()}_{loss_coeff}"
+
+    # Loss term coefficients that affect pretraining but do not relate to goal prediction.
+    for loss_name in [
+        "VF_LOSS_COEFF",
+        "OTHER_AGENT_ACTION_PREDICTOR_LOSS_COEFF",
+    ]:
+        loss_coeff = env_vars[loss_name]
+        tag += f"/{loss_name.lower()}_{loss_coeff}"
+
     # PPO-specific rewards
     if algorithm == "ppo":
         goal_loss_coeff = env_vars["GOAL_LOSS_COEFF"]
@@ -469,19 +487,10 @@ def make_train_tag(env_vars: dict, algorithm: Algorithm, agent: Agent) -> str:
 
         tag += f"/pretrain_{pretrain}"
 
-        # Loss term coefficients
-        for loss_name in [
-            "VF_LOSS_COEFF",
-            "GOAL_LOSS_COEFF",
-            "OTHER_AGENT_ACTION_PREDICTOR_LOSS_COEFF",
-        ]:
-            loss_coeff = env_vars[loss_name]
-            tag += f"/{loss_name.lower()}_{loss_coeff}"
-
     return tag
 
 
-def make_schedule_str(schedule: ScheduleConfig) -> str:
+def make_schedule_str(schedule: RewardScheduleEndpoints) -> str:
     if isinstance(schedule, (float, int)):
         if int(schedule) == schedule:
             schedule = int(schedule)
@@ -491,7 +500,7 @@ def make_schedule_str(schedule: ScheduleConfig) -> str:
         return "-".join(parts)
 
 
-def parse_puct_coefficient_schedule_str(schedule_str: str) -> ScheduleConfig:
+def parse_puct_coefficient_schedule_str(schedule_str: str) -> RewardScheduleEndpoints:
     parts = schedule_str.split("-")
     schedule = []
     for part in parts:
@@ -502,7 +511,7 @@ def parse_puct_coefficient_schedule_str(schedule_str: str) -> ScheduleConfig:
 
 def make_puct_coeff_tag(
     puct_coeff: Union[float, List[float], Tuple[float, ...]],
-    puct_coeff_schedule: Optional[ScheduleConfig],
+    puct_coeff_schedule: Optional[RewardScheduleEndpoints],
 ) -> str:
     if puct_coeff_schedule is not None:
         puct_coeff_str = f"schedule_{make_schedule_str(puct_coeff_schedule)}"
