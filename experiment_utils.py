@@ -1000,18 +1000,23 @@ def validate_env_vars(env_vars: dict, algorithm: Algorithm) -> None:
 
 def make_extra_slurm_args(env_vars: dict, algorithm: Algorithm) -> str:
     extra_slurm_args = []
-    if algorithm == "alphazero" and env_vars["USE_REPLAY_BUFFER"]:
-        # If using the replay buffer, increase the memory limit.
-        replay_buffer_size = env_vars["REPLAY_BUFFER_SIZE"]
-        if replay_buffer_size <= 5:
-            mem = "120GB"
-        elif replay_buffer_size <= 10:
-            mem = "145GB"
-        else:
+
+    # Memory
+    mem = env_vars.pop("mem", None)
+    if mem is None:
+        if algorithm == "alphazero" and env_vars["USE_REPLAY_BUFFER"]:
+            # If using the replay buffer, increase the memory limit.
+            replay_buffer_size = env_vars["REPLAY_BUFFER_SIZE"]
+            if replay_buffer_size <= 5:
+                mem = "120GB"
+            elif replay_buffer_size <= 10:
+                mem = "145GB"
+            else:
+                mem = "200GB"
+        elif algorithm == "ppo" and env_vars["NUM_LAYERS"] > 6:
             mem = "200GB"
+    if mem is not None:
         extra_slurm_args.append(f"--mem={mem}")
-    elif algorithm == "ppo" and env_vars["NUM_LAYERS"] > 6:
-        extra_slurm_args.append(f"--mem=200GB")
 
     a100_nodelist = "--nodelist=airl.ist.berkeley.edu,sac.ist.berkeley.edu,rlhf.ist.berkeley.edu,cirl.ist.berkeley.edu"
     exclude_a4000_nodelist = "--exclude=ppo.ist.berkeley.edu,vae.ist.berkeley.edu"
