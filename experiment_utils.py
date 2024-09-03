@@ -74,7 +74,9 @@ DEFAULT_HUMAN_ALPHAZERO_ENV_VARS = dict(
     GAMMA=0.95,
     LR=0.001,
     GRAD_CLIP=10,
-    SAMPLE_BATCH_SIZE=8000,
+    # Don't set sample_batch_size so that it can be set explicitly in the
+    # experiment config or computed in the script if unset.
+    # SAMPLE_BATCH_SIZE=8000,
     TRAIN_BATCH_SIZE=8,
     NUM_SGD_ITER=1,
     NUM_TRAINING_ITERS=2000,
@@ -133,7 +135,9 @@ DEFAULT_ASSISTANT_ALPHAZERO_ENV_VARS = dict(
     TRAIN_BATCH_SIZE=8,
     SEED=0,
     NUM_TRAINING_ITERS=10000,
-    SAMPLE_BATCH_SIZE=8000,
+    # Don't set sample_batch_size so that it can be set explicitly in the
+    # experiment config or computed in the script if unset.
+    # SAMPLE_BATCH_SIZE=8000,
     TELEPORTATION=False,
     NOOP_REWARD=0,
     GET_RESOURCES_REWARD=0,
@@ -369,7 +373,9 @@ def make_common_tag(env_vars: dict, algorithm: Algorithm, agent: Agent) -> str:
     if truncate_on_no_progress_timesteps is not None:
         tag += f"/trunc_no_progress_{truncate_on_no_progress_timesteps}"
     if env_vars["BATCH_MODE"] == "truncate_episodes":
-        tag += f"/rollout_{env_vars['MAX_SEQ_LEN']}"
+        tag += f"/rollout_{env_vars['ROLLOUT_FRAGMENT_LENGTH']}"
+
+    tag += f"/sgd_minibatch_{env_vars['SGD_MINIBATCH_SIZE']}"
 
     if algorithm == "alphazero":
         if env_vars["USE_REPLAY_BUFFER"]:
@@ -753,17 +759,18 @@ def get_env_vars_for_experiment(
         num_envs_per_worker = env_vars["NUM_ENVS_PER_WORKER"]
 
         if algorithm == "alphazero":
-            env_vars["SAMPLE_BATCH_SIZE"] = (
-                horizon * env_vars["NUM_WORKERS"] * num_envs_per_worker
-                if batch_mode == "complete_episodes"
-                else fragment_length * env_vars["NUM_WORKERS"] * num_envs_per_worker
-            )
+            sample_batch_size = env_vars.get("SAMPLE_BATCH_SIZE")
+            if sample_batch_size is None:
+                # Set sample batch size based on number of envs and fragment_length.
+                env_vars["SAMPLE_BATCH_SIZE"] = (
+                    horizon * env_vars["NUM_WORKERS"] * num_envs_per_worker
+                    if batch_mode == "complete_episodes"
+                    else fragment_length * env_vars["NUM_WORKERS"] * num_envs_per_worker
+                )
 
         # Set vars based on batch_mode. If truncate_episodes, keep the
         # SGD_MINIBATCH_SIZE as is; otherwise, set it to horizon.
         if batch_mode == "truncate_episodes":
-            env_vars["ROLLOUT_FRAGMENT_LENGTH"] = fragment_length
-            env_vars["MAX_SEQ_LEN"] = fragment_length
             env_vars["RANDOMIZE_FIRST_EPISODE_LENGTH"] = env_vars.get(
                 "RANDOMIZE_FIRST_EPISODE_LENGTH", True
             )
@@ -830,9 +837,16 @@ def get_env_vars_for_experiment(
                 f"{common_tag}/pretrain_True/*/*/*/run.json"
             )
         )
-        num_pretraining_iters = 100 if env_vars["SAMPLE_BATCH_SIZE"] < 10_000 else 25
-        pretrain_checkpoints = []
+        # Use the number of pretraining iterations from the environment variables
+        # if it is set; otherwise, use a default value based on the sample batch
+        # size.
+        num_pretraining_iters = env_vars.get("NUM_PRETRAINING_ITERS")
+        if num_pretraining_iters is None:
+            num_pretraining_iters = (
+                100 if env_vars["SAMPLE_BATCH_SIZE"] < 10_000 else 25
+            )
 
+        pretrain_checkpoints = []
         for run_fname in pretrain_run_fnames:
             with open(run_fname, "r") as run_file:
                 try:
@@ -966,9 +980,13 @@ def validate_env_vars(env_vars: dict, algorithm: Algorithm) -> None:
             f"SGD_MINIBATCH_SIZE ({sgd_minibatch_size}) must be > MAX_SEQ_LEN ({max_seq_len})"
         )
     fragment_length = env_vars["ROLLOUT_FRAGMENT_LENGTH"]
-    if sgd_minibatch_size <= fragment_length:
-        raise ValueError(
-            f"SGD_MINIBATCH_SIZE ({sgd_minibatch_size}) must be > ROLLOUT_FRAGMENT_LENGTH ({fragment_length})"
+    if fragment_length < max_seq_len:
+        # This is a warning because it is not necessarily an error. The fragment
+        # length can be less than the max sequence length, but in practice the
+        # sequences won't be longer than the fragment length, so it would make
+        # sense for the sequence length to be <= the fragment length.
+        print(
+            f"ROLLOUT_FRAGMENT_LENGTH ({fragment_length}) should probably be >= MAX_SEQ_LEN ({max_seq_len})"
         )
 
     batch_mode = env_vars["BATCH_MODE"]
