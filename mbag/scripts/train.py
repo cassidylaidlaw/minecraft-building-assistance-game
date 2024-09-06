@@ -365,6 +365,7 @@ def sacred_config(_log):  # noqa
     max_seq_len = horizon
     embedding_size = 8
     position_embedding_size = 18
+    position_embedding_angle = 10000
     mask_goal = False
     num_inventory_obs = num_players
     mask_other_players = num_players == 1
@@ -447,6 +448,7 @@ def sacred_config(_log):  # noqa
             "mask_goal": mask_goal,
             "mask_other_players": mask_other_players,
             "position_embedding_size": position_embedding_size,
+            "position_embedding_angle": position_embedding_angle,
             "num_layers": num_layers,
             "dim_feedforward": dim_feedforward,
             "num_heads": num_heads,

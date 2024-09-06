@@ -1462,6 +1462,7 @@ class SeparatedTransformerEncoder(nn.Module):
 
 class MbagTransformerModelConfig(MbagModelConfig, total=False):
     position_embedding_size: int
+    position_embedding_angle: float
     num_layers: int
     dim_feedforward: int
     num_heads: int
@@ -1481,6 +1482,7 @@ TRANSFORMER_DEFAULT_CONFIG: MbagTransformerModelConfig = {
     "num_value_layers": DEFAULT_CONFIG["num_value_layers"],
     "fake_state": DEFAULT_CONFIG["fake_state"],
     "position_embedding_size": 12,
+    "position_embedding_angle": 10000.0,
     "num_layers": 3,
     "dim_feedforward": DEFAULT_CONFIG["hidden_size"],
     "num_heads": 2,
@@ -1512,6 +1514,7 @@ class MbagTransformerModel(MbagTorchModel):
         )
         extra_config.update(cast(MbagTransformerModelConfig, kwargs))
         self.position_embedding_size = extra_config["position_embedding_size"]
+        self.position_embedding_angle = extra_config["position_embedding_angle"]
         self.num_layers = extra_config["num_layers"]
         self.dim_feedforward = extra_config["dim_feedforward"]
         self.num_heads = extra_config["num_heads"]
@@ -1535,6 +1538,7 @@ class MbagTransformerModel(MbagTorchModel):
             self._get_position_embedding(
                 self.position_embedding.size()[0],
                 dim_embedding_size,
+                self.position_embedding_angle,
             )[:, None, None]
         )
         self.position_embedding.data[
@@ -1542,6 +1546,7 @@ class MbagTransformerModel(MbagTorchModel):
         ] = self._get_position_embedding(
             self.position_embedding.size()[1],
             dim_embedding_size,
+            self.position_embedding_angle,
         )[
             None, :, None
         ]
@@ -1550,6 +1555,7 @@ class MbagTransformerModel(MbagTorchModel):
         ] = self._get_position_embedding(
             self.position_embedding.size()[2],
             dim_embedding_size,
+            self.position_embedding_angle,
         )[
             None, None, :
         ]
@@ -1557,7 +1563,9 @@ class MbagTransformerModel(MbagTorchModel):
     def _get_embedding_channels(self) -> int:
         return super()._get_embedding_channels() + self.position_embedding_size
 
-    def _get_position_embedding(self, seq_len: int, size: int) -> torch.Tensor:
+    def _get_position_embedding(
+        self, seq_len: int, size: int, angle: float = 10000.0
+    ) -> torch.Tensor:
         """
         Get an initial positional embedding of shape (seq_len, size) by using
         the sin/cos embedding.
@@ -1565,10 +1573,7 @@ class MbagTransformerModel(MbagTorchModel):
 
         embedding = torch.zeros(seq_len, size)
         position = torch.arange(0, seq_len, dtype=torch.float).unsqueeze(1)
-        # TODO: improve position embedding?
-        div_term = torch.exp(
-            torch.arange(0, size, 2).float() * (-np.log(10000.0) / size)
-        )
+        div_term = torch.exp(torch.arange(0, size, 2).float() * (-np.log(angle) / size))
         embedding[:, 0::2] = torch.sin(position * div_term)
         embedding[:, 1::2] = torch.cos(position * div_term)
         return embedding
