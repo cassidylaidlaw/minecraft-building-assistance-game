@@ -86,8 +86,8 @@ DEFAULT_HUMAN_ALPHAZERO_ENV_VARS = dict(
     NUM_ENVS_PER_WORKER=8,
     NUM_GPUS_PER_WORKER=0.1,
     HORIZON=500,
-    ROLLOUT_FRAGMENT_LENGTH=511,
-    MAX_SEQ_LEN=511,
+    ROLLOUT_FRAGMENT_LENGTH=256,
+    MAX_SEQ_LEN=256,
     SGD_MINIBATCH_SIZE=512,
     RANDOMIZE_FIRST_EPISODE_LENGTH=True,
     BATCH_MODE="truncate_episodes",
@@ -142,8 +142,8 @@ DEFAULT_ASSISTANT_ALPHAZERO_ENV_VARS = dict(
     NOOP_REWARD=0,
     GET_RESOURCES_REWARD=0,
     ACTION_REWARD=0,
-    ROLLOUT_FRAGMENT_LENGTH=511,
-    MAX_SEQ_LEN=511,
+    ROLLOUT_FRAGMENT_LENGTH=256,
+    MAX_SEQ_LEN=256,
     NUM_SIMULATIONS=100,
     USE_GOAL_PREDICTOR=True,
     USE_BILEVEL_ACTION_SELECTION=True,
@@ -200,8 +200,8 @@ DEFAULT_ASSISTANT_PPO_ENV_VARS = dict(
     KL_TARGET=0.01,
     BATCH_MODE="truncate_episodes",
     RANDOMIZE_FIRST_EPISODE_LENGTH=True,
-    ROLLOUT_FRAGMENT_LENGTH=511,
-    MAX_SEQ_LEN=511,
+    ROLLOUT_FRAGMENT_LENGTH=256,
+    MAX_SEQ_LEN=256,
     GOAL_LOSS_COEFF=0.5,
     OWN_REWARD_PROP=1,
     SGD_MINIBATCH_SIZE=512,
@@ -987,6 +987,16 @@ def validate_env_vars(env_vars: dict, algorithm: Algorithm) -> None:
         # sense for the sequence length to be <= the fragment length.
         print(
             f"ROLLOUT_FRAGMENT_LENGTH ({fragment_length}) should probably be >= MAX_SEQ_LEN ({max_seq_len})"
+        )
+    sample_batch_size_gcf = (
+        env_vars["ROLLOUT_FRAGMENT_LENGTH"]
+        * env_vars["NUM_WORKERS"]
+        * env_vars["NUM_ENVS_PER_WORKER"]
+    )
+    sample_batch_size = env_vars["SAMPLE_BATCH_SIZE"]
+    if sample_batch_size % sample_batch_size_gcf != 0:
+        raise ValueError(
+            f"SAMPLE_BATCH_SIZE ({sample_batch_size}) should be divisible by {sample_batch_size_gcf} to avoid large memory usage."
         )
 
     batch_mode = env_vars["BATCH_MODE"]
