@@ -7,7 +7,7 @@ import glob
 import json
 import logging
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 
@@ -147,6 +147,7 @@ def test_experiments(tmp_path):
 
     # Test bc_human
     bc_human_results: Dict[str, Any] = {}
+    bc_human_data_splits: Dict[str, str] = {}
     for bc_human_name, data_split, checkpoint_to_load_policies in [
         ("rand_init_human_alone", "human_alone", None),
         ("rand_init_human_with_assistant", "human_with_assistant", None),
@@ -170,6 +171,7 @@ def test_experiments(tmp_path):
             f"data/testing/reference_experiments/bc_human_{bc_human_name}",
         )
         bc_human_results[bc_human_name] = bc_human_result
+        bc_human_data_splits[bc_human_name] = data_split
 
     # Test piKL
     pikl_result = train_ex.run(
@@ -190,20 +192,24 @@ def test_experiments(tmp_path):
     )
 
     # Test all human model evals
-    human_models: List[Tuple[str, str]] = (
+    human_models: List[Tuple[str, str, Optional[str]]] = (
         [
-            ("MbagPPO", ppo_human_result["final_checkpoint"]),
-            ("MbagAlphaZero", alphazero_human_result["final_checkpoint"]),
+            ("MbagPPO", ppo_human_result["final_checkpoint"], None),
+            ("MbagAlphaZero", alphazero_human_result["final_checkpoint"], None),
         ]
         + [
-            ("BC", bc_human_result["final_checkpoint"])
-            for bc_human_result in bc_human_results.values()
+            (
+                "BC",
+                bc_human_result["final_checkpoint"],
+                bc_human_data_splits[bc_human_name],
+            )
+            for bc_human_name, bc_human_result in bc_human_results.items()
         ]
         + [
-            ("MbagAlphaZero", pikl_result["final_checkpoint"]),
+            ("MbagAlphaZero", pikl_result["final_checkpoint"], "human_alone"),
         ]
     )
-    for human_model_run, human_model_checkpoint in human_models:
+    for human_model_run, human_model_checkpoint, human_model_data_split in human_models:
         extra_config_updates = {}
         if human_model_run == "MbagAlphaZero":
             extra_config_updates = {
@@ -213,15 +219,23 @@ def test_experiments(tmp_path):
             }
 
         for data_split in ["human_alone", "human_with_assistant"]:
+            if data_split == "human_alone":
+                player_index = 0
+            else:
+                player_index = 1
             evaluate_human_modeling_result = evaluate_human_modeling_ex.run(
                 config_updates={
-                    "run": human_model_run,
                     "checkpoint": human_model_checkpoint,
                     "policy_id": "human",
                     "participant_ids": [3],
                     "max_episode_len": 10,
                     "extra_config_updates": extra_config_updates,
-                    "human_data_dir": f"data/human_data_cleaned/{data_split}/infinite_blocks_true/rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_0",
+                    "human_data_dir": f"data/human_data_cleaned/{data_split}/infinite_blocks_true/rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_{player_index}"
+                    + (
+                        f"_inventory_{player_index}"
+                        if human_model_data_split in ["human_alone", None]
+                        else "_inventory_0_1"
+                    ),
                 },
             ).result
             assert evaluate_human_modeling_result is not None
@@ -252,10 +266,10 @@ def test_experiments(tmp_path):
         named_configs=["alphazero_assistant"],
         config_updates={
             "experiment_dir": str(tmp_path / "alphazero_assistant"),
-            "checkpoint_to_load_policies": bc_human_results["rand_init_human_alone"][
-                "final_checkpoint"
-            ],
-            "checkpoint_name": "rand_init_human_alone",
+            "checkpoint_to_load_policies": bc_human_results[
+                "rand_init_human_with_assistant"
+            ]["final_checkpoint"],
+            "checkpoint_name": "rand_init_human_with_assistant",
             **common_config_updates,
         },
     ).result

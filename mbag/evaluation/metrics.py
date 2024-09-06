@@ -40,6 +40,7 @@ class MbagEpisodeMetrics(TypedDict):
     goal_similarity: float
     goal_distance: float
     goal_percentage: float
+    reward: float
 
 
 def get_rounded_minutes(episode: MbagEpisode, t: int) -> int:
@@ -63,6 +64,87 @@ def get_rounded_minutes(episode: MbagEpisode, t: int) -> int:
     return int(total_seconds // 60)
 
 
+def calculate_per_player_metrics(
+    episode: MbagEpisode, player_index: int
+) -> MbagPlayerMetrics:
+    player_metrics: MbagPlayerMetrics = {}
+    per_minute_player_metrics: Dict[str, float] = {}
+
+    for valid_action_type in MbagActionDistribution.get_valid_action_types(
+        episode.env_config
+    ):
+        action_type_name = MbagAction.ACTION_TYPE_NAMES[valid_action_type]
+        player_metrics[f"num_{action_type_name.lower()}"] = 0  # type: ignore[literal-required]
+        if valid_action_type in [MbagAction.BREAK_BLOCK, MbagAction.PLACE_BLOCK]:
+            player_metrics[f"num_correct_{action_type_name.lower()}"] = 0  # type: ignore[literal-required]
+    player_metrics["num_unintentional_noop"] = 0
+    if not episode.env_config["abilities"]["inf_blocks"]:
+        player_metrics["num_break_palette"] = 0
+    player_metrics["own_reward"] = 0
+    player_metrics["goal_dependent_reward"] = 0
+    player_metrics["goal_independent_reward"] = 0
+
+    for t in range(episode.env_config["horizon"]):
+        if t < episode.length:
+            info_dict = episode.info_history[t][player_index]
+
+            player_metrics["own_reward"] += info_dict["own_reward"]
+            player_metrics["goal_dependent_reward"] += info_dict[
+                "goal_dependent_reward"
+            ]
+            player_metrics["goal_independent_reward"] += info_dict[
+                "goal_independent_reward"
+            ]
+
+            action = info_dict["action"]
+            if action.action_type == MbagAction.BREAK_BLOCK and action.is_palette(
+                episode.env_config["abilities"]["inf_blocks"]
+            ):
+                action_type_name = MBAG_ACTION_BREAK_PALETTE_NAME
+            else:
+                action_type_name = MbagAction.ACTION_TYPE_NAMES[action.action_type]
+            player_metrics[f"num_{action_type_name.lower()}"] += 1  # type: ignore[literal-required]
+
+            if (
+                info_dict["attempted_action"].action_type != MbagAction.NOOP
+                and info_dict["action"].action_type == MbagAction.NOOP
+            ):
+                player_metrics["num_unintentional_noop"] += 1
+
+            if info_dict["action_correct"]:
+                player_metrics[f"num_correct_{action_type_name.lower()}"] += 1  # type: ignore[literal-required]
+
+        rounded_minutes = get_rounded_minutes(episode, t)
+        for metric_key in player_metrics:
+            if rounded_minutes > 0:
+                metric_min_key = f"{metric_key}_{rounded_minutes}_min"
+                if metric_min_key not in per_minute_player_metrics:
+                    per_minute_player_metrics[metric_min_key] = player_metrics[
+                        metric_key  # type: ignore[literal-required]
+                    ]
+
+    last_info_dict = episode.last_infos[player_index]
+    player_metrics["own_reward_prop"] = last_info_dict["own_reward_prop"]
+    player_metrics["per_minute_metrics"] = per_minute_player_metrics
+
+    action_type_names = [
+        MbagAction.ACTION_TYPE_NAMES[action_type]
+        for action_type in [
+            MbagAction.BREAK_BLOCK,
+            MbagAction.PLACE_BLOCK,
+        ]
+    ]
+    for action_type_name in action_type_names:
+        num_correct = cast(
+            int, player_metrics.get(f"num_correct_{action_type_name.lower()}", 0)
+        )
+        total: int = cast(int, player_metrics.get(f"num_{action_type_name.lower()}", 0))
+        percent_correct = num_correct / total if total != 0 else np.nan
+        player_metrics[f"{action_type_name.lower()}_accuracy"] = percent_correct  # type: ignore[literal-required]
+
+    return player_metrics
+
+
 def calculate_metrics(episode: MbagEpisode) -> MbagEpisodeMetrics:
     width, height, depth = episode.env_config["world_size"]
 
@@ -71,101 +153,31 @@ def calculate_metrics(episode: MbagEpisode) -> MbagEpisodeMetrics:
 
     players_metrics: List[MbagPlayerMetrics] = []
     for player_index in range(episode.env_config["num_players"]):
-        player_metrics: MbagPlayerMetrics = {}
-        per_minute_player_metrics: Dict[str, float] = {}
-
-        for valid_action_type in MbagActionDistribution.get_valid_action_types(
-            episode.env_config
-        ):
-            action_type_name = MbagAction.ACTION_TYPE_NAMES[valid_action_type]
-            player_metrics[f"num_{action_type_name.lower()}"] = 0  # type: ignore[literal-required]
-            if valid_action_type in [MbagAction.BREAK_BLOCK, MbagAction.PLACE_BLOCK]:
-                player_metrics[f"num_correct_{action_type_name.lower()}"] = 0  # type: ignore[literal-required]
-        player_metrics["num_unintentional_noop"] = 0
-        if not episode.env_config["abilities"]["inf_blocks"]:
-            player_metrics["num_break_palette"] = 0
-        player_metrics["own_reward"] = 0
-        player_metrics["goal_dependent_reward"] = 0
-        player_metrics["goal_independent_reward"] = 0
-
-        for t in range(episode.env_config["horizon"]):
-            if t < episode.length:
-                info_dict = episode.info_history[t][player_index]
-
-                player_metrics["own_reward"] += info_dict["own_reward"]
-                player_metrics["goal_dependent_reward"] += info_dict[
-                    "goal_dependent_reward"
-                ]
-                player_metrics["goal_independent_reward"] += info_dict[
-                    "goal_independent_reward"
-                ]
-
-                action = info_dict["action"]
-                if action.action_type == MbagAction.BREAK_BLOCK and action.is_palette(
-                    episode.env_config["abilities"]["inf_blocks"]
-                ):
-                    action_type_name = MBAG_ACTION_BREAK_PALETTE_NAME
-                else:
-                    action_type_name = MbagAction.ACTION_TYPE_NAMES[action.action_type]
-                player_metrics[f"num_{action_type_name.lower()}"] += 1  # type: ignore[literal-required]
-
-                if (
-                    info_dict["attempted_action"].action_type != MbagAction.NOOP
-                    and info_dict["action"].action_type == MbagAction.NOOP
-                ):
-                    player_metrics["num_unintentional_noop"] += 1
-
-                if info_dict["action_correct"]:
-                    player_metrics[f"num_correct_{action_type_name.lower()}"] += 1  # type: ignore[literal-required]
-
-            rounded_minutes = get_rounded_minutes(episode, t)
-            for metric_key in player_metrics:
-                if rounded_minutes > 0:
-                    metric_min_key = f"{metric_key}_{rounded_minutes}_min"
-                    if metric_min_key not in per_minute_player_metrics:
-                        per_minute_player_metrics[metric_min_key] = player_metrics[
-                            metric_key  # type: ignore[literal-required]
-                        ]
-
-        last_info_dict = episode.last_infos[player_index]
-        player_metrics["own_reward_prop"] = last_info_dict["own_reward_prop"]
-        player_metrics["per_minute_metrics"] = per_minute_player_metrics
-
-        action_type_names = [
-            MbagAction.ACTION_TYPE_NAMES[action_type]
-            for action_type in [
-                MbagAction.BREAK_BLOCK,
-                MbagAction.PLACE_BLOCK,
-            ]
-        ]
-        for action_type_name in action_type_names:
-            num_correct = cast(
-                int, player_metrics.get(f"num_correct_{action_type_name.lower()}", 0)
-            )
-            total: int = cast(
-                int, player_metrics.get(f"num_{action_type_name.lower()}", 0)
-            )
-            percent_correct = num_correct / total if total != 0 else np.nan
-            player_metrics[f"{action_type_name.lower()}_accuracy"] = percent_correct  # type: ignore[literal-required]
-
-        players_metrics.append(player_metrics)
+        players_metrics.append(calculate_per_player_metrics(episode, player_index))
 
     metrics: MbagEpisodeMetrics = {
         "goal_similarity": episode.last_infos[0]["goal_similarity"],
         "goal_distance": goal_distance,
         "goal_percentage": episode.last_infos[0].get("goal_percentage", np.nan),
         "player_metrics": players_metrics,
+        "reward": sum(episode.reward_history),
     }
 
+    cumulative_reward = 0.0
     for t in range(episode.env_config["horizon"]):
         rounded_minutes = get_rounded_minutes(episode, t)
         info_dict = episode.info_history[min(t, episode.length - 1)][0]
+        if t < len(episode.reward_history):
+            cumulative_reward += episode.reward_history[t]
         if rounded_minutes > 0:
             goal_percentage_key = f"goal_percentage_{rounded_minutes}_min"
             if goal_percentage_key not in metrics:
                 metrics[goal_percentage_key] = info_dict[  # type: ignore[literal-required]
                     "goal_percentage"
                 ]
+            reward_key = f"reward_{rounded_minutes}_min"
+            if reward_key not in metrics:
+                metrics[reward_key] = cumulative_reward  # type: ignore[literal-required]
 
     return metrics
 
@@ -210,6 +222,9 @@ def calculate_mean_metrics(
                 for episode_metrics in episodes_metrics
                 if "goal_percentage" in episode_metrics
             ]
+        ),
+        "reward": np.mean(
+            [episode_metrics["reward"] for episode_metrics in episodes_metrics]
         ),
         "player_metrics": mean_player_metrics,
     }

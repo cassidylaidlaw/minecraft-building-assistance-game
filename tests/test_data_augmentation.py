@@ -56,6 +56,7 @@ def test_randomly_permute_block_types():
 
         all_obs = []
         all_actions = []
+        all_prev_actions: list = [0 if flat_actions else (0, 0, 0)]
         all_rewards = []
         (obs,), _ = env.reset()
         all_obs.append(obs)
@@ -69,6 +70,7 @@ def test_randomly_permute_block_types():
             all_rewards.append(rewards)
             if t < horizon - 1:
                 all_obs.append(obs)
+                all_prev_actions.append(flat_action if flat_actions else action)
 
         batch = SampleBatch(
             {
@@ -92,9 +94,16 @@ def test_randomly_permute_block_types():
             )
         if flat_actions:
             batch[SampleBatch.ACTIONS] = np.array(all_actions * episodes)
+            batch[SampleBatch.PREV_ACTIONS] = np.array(all_prev_actions * episodes)
         else:
             batch[SampleBatch.ACTIONS] = tuple(
                 np.array([action[action_part] for action in all_actions] * episodes)
+                for action_part in range(3)
+            )
+            batch[SampleBatch.PREV_ACTIONS] = tuple(
+                np.array(
+                    [action[action_part] for action in all_prev_actions] * episodes
+                )
                 for action_part in range(3)
             )
 
@@ -118,6 +127,33 @@ def test_randomly_permute_block_types():
         )
 
         for episode_index in range(episodes):
+            for actions_part, prev_actions_part in (
+                [
+                    (
+                        new_batch[SampleBatch.ACTIONS],
+                        new_batch[SampleBatch.PREV_ACTIONS],
+                    ),
+                ]
+                if flat_actions
+                else [
+                    (
+                        new_batch[SampleBatch.ACTIONS][i],
+                        new_batch[SampleBatch.PREV_ACTIONS][i],
+                    )
+                    for i in range(3)
+                ]
+            ):
+                assert prev_actions_part[0] == 0
+                np.testing.assert_array_equal(
+                    prev_actions_part[1:horizon],
+                    actions_part[: horizon - 1],
+                )
+                assert prev_actions_part[horizon] == 0
+                np.testing.assert_array_equal(
+                    prev_actions_part[horizon + 1 :],
+                    actions_part[horizon:-1],
+                )
+
             if flat_observations:
                 initial_obs = cast(
                     MbagObs,

@@ -1,3 +1,4 @@
+import logging
 import time
 from typing import Iterable, List, Optional, cast
 
@@ -14,6 +15,8 @@ from mbag.environment.mbag_env import MbagConfigDict
 from mbag.environment.state import MbagStateDict
 from mbag.environment.types import MbagInfoDict, MbagObs
 from mbag.rllib.alpha_zero.alpha_zero_policy import C_PUCT, MbagAlphaZeroPolicy
+
+logger = logging.getLogger(__name__)
 
 
 class RllibMbagAgentConfigDict(TypedDict):
@@ -119,8 +122,11 @@ class RllibMbagAgent(MbagAgent):
             action = cast(MbagActionTuple, tuple(self.action_mapping[action_batch[0]]))
 
         action_type, _, _ = action
-        if force_noop:
-            assert action_type == MbagAction.NOOP
+        if force_noop and action_type != MbagAction.NOOP:
+            logger.warning(f"policy was passed force_noop but returned action {action}")
+            action = (MbagAction.NOOP, 0, 0)
+
+        self.prev_action = action
 
         return action
 

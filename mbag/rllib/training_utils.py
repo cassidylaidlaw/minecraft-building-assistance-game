@@ -1,12 +1,16 @@
 import glob
 import os
+import pickle
 from typing import Any, Callable, Dict, Optional, Type, Union, cast
 
 import cloudpickle
+from gymnasium import spaces
 from ray.rllib.algorithms import Algorithm, AlgorithmConfig
 from ray.rllib.evaluation.worker_set import WorkerSet
+from ray.rllib.models.preprocessors import Preprocessor, get_preprocessor
 from ray.rllib.policy.policy import Policy, PolicySpec
 from ray.rllib.utils.checkpoints import get_checkpoint_info
+from ray.rllib.utils.serialization import space_to_dict
 from ray.rllib.utils.typing import PolicyID
 from ray.tune.logger import UnifiedLogger
 from ray.tune.registry import get_trainable_cls
@@ -78,6 +82,39 @@ def load_trainer(
     trainer: Algorithm = cls.from_state(state)
 
     return trainer
+
+
+def load_policy(
+    checkpoint_path: str,
+    policy_id: PolicyID,
+    *,
+    config_updates: dict = {},
+    observation_space: Optional[spaces.Space] = None,
+) -> Policy:
+    checkpoint_info = get_checkpoint_info(checkpoint_path)
+    policy_checkpoint_info = get_checkpoint_info(
+        os.path.join(
+            checkpoint_info["checkpoint_dir"],
+            "policies",
+            policy_id,
+        )
+    )
+    assert policy_checkpoint_info["type"] == "Policy"
+    with open(policy_checkpoint_info["state_file"], "rb") as f:
+        policy_state = pickle.load(f)
+    policy_state["policy_spec"]["config"] = Algorithm.merge_algorithm_configs(
+        policy_state["policy_spec"]["config"],
+        config_updates,
+    )
+
+    if observation_space is not None:
+        preprocessor: Preprocessor = get_preprocessor(observation_space)(
+            observation_space
+        )
+        policy_state["policy_spec"]["observation_space"] = space_to_dict(
+            preprocessor.observation_space
+        )
+    return Policy.from_state(policy_state)
 
 
 def load_policies_from_checkpoint(

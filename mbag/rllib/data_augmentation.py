@@ -32,10 +32,22 @@ def randomly_permute_block_types(
         action_mapping = MbagActionDistribution.get_action_mapping(env_config)
         old_action_block_locations = action_mapping[batch[SampleBatch.ACTIONS]][:, 0]
         old_action_block_ids = action_mapping[batch[SampleBatch.ACTIONS]][:, 2]
+        if SampleBatch.PREV_ACTIONS in batch:
+            old_prev_action_block_locations = action_mapping[
+                batch[SampleBatch.PREV_ACTIONS]
+            ][:, 0]
+            old_prev_action_block_ids = action_mapping[batch[SampleBatch.PREV_ACTIONS]][
+                :, 2
+            ]
     else:
         old_action_block_locations = batch[SampleBatch.ACTIONS][0]
         old_action_block_ids = batch[SampleBatch.ACTIONS][2]
+        if SampleBatch.PREV_ACTIONS in batch:
+            old_prev_action_block_locations = batch[SampleBatch.PREV_ACTIONS][0]
+            old_prev_action_block_ids = batch[SampleBatch.PREV_ACTIONS][2]
     new_action_block_ids = np.empty_like(old_action_block_ids)
+    if SampleBatch.PREV_ACTIONS in batch:
+        new_prev_action_block_ids = np.empty_like(old_prev_action_block_ids)
 
     if flat_observations:
         if env_config is None:
@@ -112,6 +124,10 @@ def randomly_permute_block_types(
         new_action_block_ids[seq_begin:seq_end] = block_map[
             old_action_block_ids[seq_begin:seq_end]
         ]
+        if SampleBatch.PREV_ACTIONS in batch:
+            new_prev_action_block_ids[seq_begin:seq_end] = block_map[
+                old_prev_action_block_ids[seq_begin:seq_end]
+            ]
 
         if keep_dirt_at_ground_level:
             if env_config is not None and not env_config["abilities"]["inf_blocks"]:
@@ -139,6 +155,17 @@ def randomly_permute_block_types(
             new_action_block_ids[seq_begin:seq_end][actions_at_ground_level] = (
                 old_action_block_ids[seq_begin:seq_end][actions_at_ground_level]
             )
+            if SampleBatch.PREV_ACTIONS in batch:
+                _, old_prev_action_y, _ = np.unravel_index(
+                    old_prev_action_block_locations[seq_begin:seq_end],
+                    (width, height, depth),
+                )
+                prev_actions_at_ground_level = old_prev_action_y == 1
+                new_prev_action_block_ids[seq_begin:seq_end][
+                    prev_actions_at_ground_level
+                ] = old_prev_action_block_ids[seq_begin:seq_end][
+                    prev_actions_at_ground_level
+                ]
 
         seq_begin = seq_end
 
@@ -148,7 +175,16 @@ def randomly_permute_block_types(
         new_batch[SampleBatch.ACTIONS] += (
             (new_action_block_ids - old_action_block_ids) * width * height * depth
         )
+        if SampleBatch.PREV_ACTIONS in batch:
+            new_batch[SampleBatch.PREV_ACTIONS] += (
+                (new_prev_action_block_ids - old_prev_action_block_ids)
+                * width
+                * height
+                * depth
+            )
     else:
         new_batch[SampleBatch.ACTIONS][2][:] = new_action_block_ids
+        if SampleBatch.PREV_ACTIONS in batch:
+            new_batch[SampleBatch.PREV_ACTIONS][2][:] = new_prev_action_block_ids
 
     return new_batch

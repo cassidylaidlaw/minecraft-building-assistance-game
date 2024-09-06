@@ -8,6 +8,7 @@ from ray.rllib.evaluation import SampleBatch
 from ray.rllib.evaluation.postprocessing import Postprocessing
 from ray.rllib.execution.rollout_ops import synchronous_parallel_sample
 from ray.rllib.execution.train_ops import multi_gpu_train_one_step, train_one_step
+from ray.rllib.models.modelv2 import restore_original_dimensions
 from ray.rllib.policy.policy import Policy
 from ray.rllib.policy.sample_batch import MultiAgentBatch, concat_samples
 from ray.rllib.utils.metrics import (
@@ -17,13 +18,18 @@ from ray.rllib.utils.metrics import (
     SYNCH_WORKER_WEIGHTS_TIMER,
 )
 from ray.rllib.utils.replay_buffers import ReplayBuffer
+from ray.rllib.utils.sgd import minibatches
 from ray.rllib.utils.typing import PolicyID, ResultDict
 from ray.tune.registry import register_trainable
+
+from mbag.environment.blocks import MinecraftBlocks
+from mbag.environment.types import CURRENT_BLOCKS, GOAL_BLOCKS
 
 from ..kl_regularization import KLRegularizationMixin
 from .alpha_zero_policy import (
     EXPECTED_OWN_REWARDS,
     EXPECTED_REWARDS,
+    GOAL_LOGITS,
     OWN_REWARDS,
     VALUE_ESTIMATES,
     MbagAlphaZeroPolicy,
@@ -244,6 +250,75 @@ class MbagAlphaZero(AlphaZero, KLRegularizationMixin):
 
         return metrics_by_policy
 
+    def get_goal_prediction_metrics(
+        self, sample_batch: MultiAgentBatch
+    ) -> Dict[PolicyID, dict]:
+        metrics_by_policy: Dict[PolicyID, dict] = {}
+
+        for policy_id, policy_batch in sample_batch.policy_batches.items():
+            policy = self.get_policy(policy_id)
+            if not isinstance(policy, MbagAlphaZeroPolicy):
+                continue
+            if GOAL_LOGITS not in policy_batch:
+                continue
+
+            total_blocks = 0
+            total_cross_entropy = 0.0
+            total_unplaced_blocks = 0
+            total_unplaced_blocks_cross_entropy = 0.0
+
+            for minibatch in minibatches(
+                policy_batch, self.config["sgd_minibatch_size"]
+            ):
+                minibatch.decompress_if_needed()
+                world_obs, _, _ = restore_original_dimensions(
+                    minibatch[SampleBatch.OBS],
+                    obs_space=policy.observation_space,
+                    tensorlib=np,
+                )
+                goal_blocks: np.ndarray = world_obs[:, GOAL_BLOCKS].astype(np.uint8)
+
+                goal_blocks_flat: np.ndarray = goal_blocks.reshape(-1)
+                goal_logits_flat: np.ndarray = (
+                    minibatch[GOAL_LOGITS]
+                    .transpose(0, 2, 3, 4, 1)
+                    .reshape(
+                        -1,
+                        MinecraftBlocks.NUM_BLOCKS,
+                    )
+                )
+                goal_logprobs_flat = goal_logits_flat - np.log(
+                    np.sum(np.exp(goal_logits_flat), axis=1, keepdims=True)
+                )
+                if self.config["_strict_mode"]:
+                    assert np.allclose(
+                        np.sum(np.exp(goal_logprobs_flat), axis=1),
+                        np.ones(len(goal_blocks_flat)),
+                    )
+
+                goal_ce = -goal_logprobs_flat[
+                    np.arange(len(goal_blocks_flat)), goal_blocks_flat
+                ]
+                unplaced_blocks = (goal_blocks != MinecraftBlocks.AIR) & (
+                    world_obs[:, CURRENT_BLOCKS] == MinecraftBlocks.AIR
+                )
+                unplaced_blocks_flat = unplaced_blocks.reshape(-1)
+
+                total_blocks += len(goal_ce)
+                total_cross_entropy += np.sum(goal_ce)
+                total_unplaced_blocks += np.sum(unplaced_blocks)
+                total_unplaced_blocks_cross_entropy += np.sum(
+                    goal_ce[unplaced_blocks_flat]
+                )
+
+            metrics_by_policy[policy_id] = {
+                "goal_cross_entropy": total_cross_entropy / total_blocks,
+                "unplaced_blocks_goal_cross_entropy": total_unplaced_blocks_cross_entropy
+                / total_unplaced_blocks,
+            }
+
+        return metrics_by_policy
+
     def training_step(self) -> ResultDict:
         assert self.workers is not None
         assert isinstance(self.config, MbagAlphaZeroConfig)
@@ -275,9 +350,20 @@ class MbagAlphaZero(AlphaZero, KLRegularizationMixin):
         )
 
         assert isinstance(new_sample_batch, MultiAgentBatch)
-        prediction_metrics_by_policy = self.get_reward_and_value_prediction_metrics(
+        prediction_metrics_by_policy: Dict[PolicyID, dict] = {}
+        for (
+            policy_id,
+            prediction_metrics,
+        ) in self.get_reward_and_value_prediction_metrics(new_sample_batch).items():
+            prediction_metrics_by_policy.setdefault(policy_id, {}).update(
+                prediction_metrics
+            )
+        for policy_id, prediction_metrics in self.get_goal_prediction_metrics(
             new_sample_batch
-        )
+        ).items():
+            prediction_metrics_by_policy.setdefault(policy_id, {}).update(
+                prediction_metrics
+            )
 
         # Update sampling step counters.
         self._counters[NUM_ENV_STEPS_SAMPLED] += new_sample_batch.env_steps()

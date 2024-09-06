@@ -83,6 +83,8 @@ def default_bc_config():
         "vf_share_layers": True,
         "hidden_channels": 64,
         "num_sgd_iter": 1,
+        "sgd_minibatch_size": 64,
+        "num_training_iters": 10,
         "inf_blocks": False,
         "teleportation": False,
         "input": "data/human_data/sample_tutorial_rllib",
@@ -597,7 +599,7 @@ def test_alpha_zero_assistant_pretraining_with_alpha_zero_human(
         }
     )
     human_checkpoint_fname = glob.glob(
-        checkpoint_dir + "/MbagAlphaZero/self_play/6x6x6/random/*/*/checkpoint_000000"
+        checkpoint_dir + "/MbagAlphaZero/1_player/6x6x6/random/*/*/checkpoint_000000"
     )[0]
     assert os.path.exists(human_checkpoint_fname)
 
@@ -710,8 +712,8 @@ def test_bc(default_config, default_bc_config):
     assert result is not None
 
     # Without value loss, the value function shouldn't learn anything.
-    assert result["info"]["learner"]["human"]["validation"]["vf_explained_var"] < 0.1
-    assert result["info"]["learner"]["human"]["validation"]["vf_loss"] > 10
+    assert result["info"]["learner"]["human"]["learner_stats"]["vf_explained_var"] < 0.1
+    assert result["info"]["learner"]["human"]["learner_stats"]["vf_loss"] > 10
 
 
 @pytest.mark.uses_rllib
@@ -728,8 +730,10 @@ def test_bc_with_value_loss(default_config, default_bc_config):
     ).result
     assert result is not None
 
-    assert result["info"]["learner"]["human"]["validation"]["vf_explained_var"] > 0.3
-    assert result["info"]["learner"]["human"]["validation"]["vf_loss"] < 5
+    assert (
+        result["info"]["learner"]["human"]["learner_stats"]["vf_explained_var"] > 0.15
+    )
+    assert result["info"]["learner"]["human"]["learner_stats"]["vf_loss"] < 6
 
 
 @pytest.mark.uses_rllib

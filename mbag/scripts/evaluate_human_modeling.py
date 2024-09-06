@@ -4,7 +4,6 @@ from logging import Logger
 from typing import Iterable, List, Optional, TypedDict, cast
 
 import numpy as np
-import ray
 import torch
 import tqdm
 from ray.rllib.models.torch.torch_action_dist import TorchDistributionWrapper
@@ -22,9 +21,8 @@ import mbag
 from mbag.rllib.alpha_zero import MbagAlphaZeroPolicy
 from mbag.rllib.human_data import EPISODE_DIR, PARTICIPANT_ID
 from mbag.rllib.mixture_model import MixtureModel
-from mbag.rllib.os_utils import available_cpu_count
 from mbag.rllib.torch_models import MbagTorchModel
-from mbag.rllib.training_utils import load_trainer
+from mbag.rllib.training_utils import load_policy
 
 SETTINGS.CONFIG.READ_ONLY_CONFIG = False
 SETTINGS.CONFIG
@@ -35,7 +33,6 @@ ex = Experiment("evaluate")
 
 @ex.config
 def sacred_config():
-    run = "BC"  # noqa: F841
     checkpoint = ""  # noqa: F841
     policy_id = "human"  # noqa: F841
     config_updates = {  # noqa: F841
@@ -89,7 +86,6 @@ class HumanModelingEvaluationResults(TypedDict):
 
 @ex.automain
 def main(  # noqa: C901
-    run: str,
     checkpoint: str,
     policy_id: PolicyID,
     config_updates: dict,
@@ -101,11 +97,6 @@ def main(  # noqa: C901
     observer,
     _log: Logger,
 ):
-    ray.init(
-        num_cpus=available_cpu_count(),
-        ignore_reinit_error=True,
-        include_dashboard=False,
-    )
     mbag.logger.setLevel(_log.getEffectiveLevel())
 
     episode_results: List[EpisodeHumanModelingEvaluationResults] = []
@@ -115,8 +106,11 @@ def main(  # noqa: C901
         config_updates,
         extra_config_updates,
     )
-    trainer = load_trainer(checkpoint, run, config_updates)
-    policy = trainer.get_policy(policy_id)
+    policy = load_policy(
+        checkpoint,
+        policy_id,
+        config_updates=config_updates,
+    )
     assert isinstance(policy, (TorchPolicy, TorchPolicyV2))
 
     episodes: List[SampleBatch] = list(
@@ -124,6 +118,7 @@ def main(  # noqa: C901
     )
     for episode in episodes:
         del episode[SampleBatch.INFOS]  # Avoid errors when slicing the episode.
+        episode[SampleBatch.AGENT_INDEX][:] = 0
 
         if max_episode_len is not None and len(episode) > max_episode_len:
             episode = episode.slice(0, max_episode_len)
@@ -212,8 +207,6 @@ def main(  # noqa: C901
             }
         )
         total_timesteps += len(episode)
-
-    trainer.stop()
 
     overall_cross_entropy = 0
     overall_accuracy = 0

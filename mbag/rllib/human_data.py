@@ -128,7 +128,13 @@ def convert_episode_to_sample_batch(  # noqa: C901
                 inventory_obs_pieces = [inventory_obs]
                 for other_player_index in inventory_player_indices:
                     if other_player_index != player_index:
-                        other_inventory = episode.obs_history[i][other_player_index][1]
+                        if other_player_index >= len(episode.obs_history[i]):
+                            # The other player's observation is missing.
+                            other_inventory = np.zeros_like(inventory_obs)
+                        else:
+                            other_inventory = episode.obs_history[i][
+                                other_player_index
+                            ][1]
                         inventory_obs_pieces.append(other_inventory)
                 inventory_obs = np.stack(inventory_obs_pieces, axis=0)
             # The inventory obs should be zeros if the player has infinite blocks.

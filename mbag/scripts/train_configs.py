@@ -150,16 +150,11 @@ def make_named_configs(ex: Experiment):
         data_split = "human_alone"
         inf_blocks = True
         teleportation = False
-        input = (
-            f"data/human_data_cleaned/{data_split}/"
-            f"infinite_blocks_{str(inf_blocks).lower()}/"
-            "rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_0"
-        )
         train_batch_size = {
             True: {
                 "human_alone": 9642,
-                "human_with_assistant": 9479,
-                "combined": 19121,
+                "human_with_assistant": 9759,
+                "combined": 9642 + 9759,
             },
         }[inf_blocks][data_split]
         num_workers = 0
@@ -175,12 +170,20 @@ def make_named_configs(ex: Experiment):
         width = 11
         height = 10
         depth = 10
+        policy_ids = ["human"]
+        if data_split != "human_alone":
+            num_players = 2
+        evaluation_num_players = 1
         model = "transformer"
         line_of_sight_masking = True
         hidden_size = 64
+        norm_first = False
+        use_prev_action = False
+        use_fc_after_embedding = True
         sgd_minibatch_size = 128
         use_separated_transformer = True
-        num_layers = 6
+        interleave_lstm = False
+        num_layers = 8 if interleave_lstm else 6
         vf_share_layers = True
         num_sgd_iter = 1
         inf_blocks = True
@@ -200,12 +203,44 @@ def make_named_configs(ex: Experiment):
         overwrite_loaded_policy_type = True
         lr_start = 1e-3 if checkpoint_to_load_policies is None else 1e-4
         lr = lr_start
-        lr_schedule = [[0, lr_start], [train_batch_size * 10, lr_start / 10]]
+        lr_schedule = [
+            [0, lr_start],
+            [train_batch_size * num_training_iters / 2, lr_start / 10],
+        ]
         vf_loss_coeff = 0
         gamma = 0.95
         scale_obs = True
         permute_block_types = True
+
+        input = (
+            f"data/human_data_cleaned/{data_split}/"
+            f"infinite_blocks_{str(inf_blocks).lower()}/"
+            "rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired"
+        )
+        if data_split == "human_alone":
+            input += "_player_0_inventory_0"
+        elif data_split == "human_with_assistant":
+            input += "_player_1_inventory_0_1"
+        elif data_split == "combined":
+            input += "_player_0_inventory_0_1"
+        if interleave_lstm:
+            input += "_seq_512"  # _overlap_4"
+            max_seq_len = 512
+            sgd_minibatch_size = 512
+            # train_batch_size *= 4
+            # lr_schedule[1][0] *= 4
+
         experiment_tag = f"bc_human/lr_{lr_start}/infinite_blocks_{str(inf_blocks).lower()}/{data_split}"
+        if (num_layers, hidden_size) != (6, 64):
+            experiment_tag += f"/model_{num_layers}x{hidden_size}"
+        if interleave_lstm:
+            experiment_tag += "/lstm"  # _overlap_4"
+        if use_prev_action:
+            experiment_tag += "/use_prev_action"
+        if norm_first:
+            experiment_tag += "/norm_first"
+        if num_training_iters != 20:
+            experiment_tag += f"/{num_training_iters}_iters"
         if checkpoint_to_load_policies is not None:
             experiment_tag += f"/init_{checkpoint_name}"
 
