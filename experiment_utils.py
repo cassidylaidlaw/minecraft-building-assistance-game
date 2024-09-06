@@ -131,6 +131,10 @@ DEFAULT_ASSISTANT_ALPHAZERO_ENV_VARS = dict(
     GRAD_CLIP=10,
     NUM_LAYERS=6,
     HIDDEN_SIZE=64,
+    NUM_HEADS=4,
+    NORM_FIRST=False,
+    POSITION_EMBEDDING_SIZE=18,
+    DIM_FEEDFORWARD=64,
     NUM_SGD_ITER=1,
     TRAIN_BATCH_SIZE=8,
     SEED=0,
@@ -388,13 +392,16 @@ def make_common_tag(env_vars: dict, algorithm: Algorithm, agent: Agent) -> str:
     if vf_scale != 1:
         tag += f"/vf_scale_{vf_scale}"
 
-    # Model architecture
+    ### Model architecture
+    # Transformer
     tag += f"/model_{env_vars['NUM_LAYERS']}x{env_vars['HIDDEN_SIZE']}"
     tag += (
         "/sep_transformer"
         if env_vars["USE_SEPARATED_TRANSFORMER"]
         else "/no_sep_transformer"
     )
+    tag += f"/dim_feedforward_{env_vars['DIM_FEEDFORWARD']}/num_heads_{env_vars['NUM_HEADS']}/norm_first_{env_vars['NORM_FIRST']}/position_embedding_size_{env_vars['POSITION_EMBEDDING_SIZE']}"
+    # LSTM
     use_per_location_stm = env_vars["USE_PER_LOCATION_LSTM"]
     interleave_lstm = env_vars["INTERLEAVE_LSTM"]
     assert not (
@@ -997,6 +1004,13 @@ def validate_env_vars(env_vars: dict, algorithm: Algorithm) -> None:
     if sample_batch_size % sample_batch_size_gcf != 0:
         raise ValueError(
             f"SAMPLE_BATCH_SIZE ({sample_batch_size}) should be divisible by {sample_batch_size_gcf} to avoid large memory usage."
+        )
+
+    hidden_size = env_vars["HIDDEN_SIZE"]
+    num_heads = env_vars["NUM_HEADS"]
+    if hidden_size % num_heads != 0:
+        raise ValueError(
+            f"HIDDEN_SIZE ({hidden_size}) should be divisible by NUM_HEADS ({num_heads})"
         )
 
     batch_mode = env_vars["BATCH_MODE"]
