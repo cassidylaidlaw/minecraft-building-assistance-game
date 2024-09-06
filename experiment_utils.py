@@ -73,6 +73,7 @@ DEFAULT_HUMAN_ALPHAZERO_ENV_VARS = dict(
     PUCT_COEFFICIENT_SCHEDULE=None,
     GAMMA=0.95,
     LR=0.001,
+    WEIGHT_DECAY=0,
     GRAD_CLIP=10,
     # Don't set sample_batch_size so that it can be set explicitly in the
     # experiment config or computed in the script if unset.
@@ -128,12 +129,14 @@ DEFAULT_ASSISTANT_ALPHAZERO_ENV_VARS = dict(
     USE_REPLAY_BUFFER=True,
     GAMMA=0.95,
     LR=0.001,
+    WEIGHT_DECAY=0,
     GRAD_CLIP=10,
     NUM_LAYERS=6,
     HIDDEN_SIZE=64,
     NUM_HEADS=4,
     NORM_FIRST=False,
     POSITION_EMBEDDING_SIZE=18,
+    POSITION_EMBEDDING_ANGLE=10000,
     DIM_FEEDFORWARD=64,
     NUM_SGD_ITER=1,
     TRAIN_BATCH_SIZE=8,
@@ -387,7 +390,7 @@ def make_common_tag(env_vars: dict, algorithm: Algorithm, agent: Agent) -> str:
         else:
             tag += f"/no_replay/train_{env_vars['NUM_SGD_ITER']}x1"
 
-    tag += f"/max_seq_len_{env_vars['MAX_SEQ_LEN']}/gamma_{env_vars['GAMMA']}/lr_{env_vars['LR']}"
+    tag += f"/max_seq_len_{env_vars['MAX_SEQ_LEN']}/gamma_{env_vars['GAMMA']}/lr_{env_vars['LR']}/weight_decay_{env_vars.get('WEIGHT_DECAY', 0)}"
     vf_scale = env_vars.get("VF_SCALE", 1)
     if vf_scale != 1:
         tag += f"/vf_scale_{vf_scale}"
@@ -400,7 +403,7 @@ def make_common_tag(env_vars: dict, algorithm: Algorithm, agent: Agent) -> str:
         if env_vars["USE_SEPARATED_TRANSFORMER"]
         else "/no_sep_transformer"
     )
-    tag += f"/dim_feedforward_{env_vars['DIM_FEEDFORWARD']}/num_heads_{env_vars['NUM_HEADS']}/norm_first_{env_vars['NORM_FIRST']}/position_embedding_size_{env_vars['POSITION_EMBEDDING_SIZE']}"
+    tag += f"/dim_feedforward_{env_vars['DIM_FEEDFORWARD']}/num_heads_{env_vars['NUM_HEADS']}/norm_first_{env_vars['NORM_FIRST']}/position_embedding_size_{env_vars['POSITION_EMBEDDING_SIZE']}/position_embedding_angle_{env_vars['POSITION_EMBEDDING_ANGLE']}"
     # LSTM
     use_per_location_stm = env_vars["USE_PER_LOCATION_LSTM"]
     interleave_lstm = env_vars["INTERLEAVE_LSTM"]
@@ -1019,6 +1022,11 @@ def validate_env_vars(env_vars: dict, algorithm: Algorithm) -> None:
     ]:
         raise ValueError(
             "RANDOMIZE_FIRST_EPISODE_LENGTH should (probably) be True if BATCH_MODE is 'truncate_episodes' and False otherwise."
+        )
+
+    if not env_vars["USE_SEPARATED_TRANSFORMER"] and env_vars["INTERLEAVE_LSTM"]:
+        raise ValueError(
+            "Interleaving LSTM layers is not supported with a non-separated Transformer."
         )
 
 
