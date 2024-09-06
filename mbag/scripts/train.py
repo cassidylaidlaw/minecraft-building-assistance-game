@@ -301,6 +301,7 @@ def sacred_config(_log):  # noqa
     num_training_iters = 500  # noqa: F841
     lr = 1e-3
     lr_schedule = None
+    weight_decay = 0
     grad_clip = 10
     gamma = 0.95
     gae_lambda = 0.98
@@ -665,6 +666,7 @@ def sacred_config(_log):  # noqa
     )
     config.rl_module(_enable_rl_module_api=False)
     config.training(
+        optimizer=dict(weight_decay=weight_decay),
         _enable_learner_api=False,
     )
     config.simple_optimizer = simple_optimizer

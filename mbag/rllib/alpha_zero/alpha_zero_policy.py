@@ -708,6 +708,28 @@ class MbagAlphaZeroPolicy(EntropyCoeffSchedule, LearningRateSchedule, AlphaZeroP
 
         return total_loss
 
+    def optimizer(
+        self,
+    ) -> Union[List[torch.optim.Optimizer], torch.optim.Optimizer]:
+        """Custom the local PyTorch optimizer(s) to use.
+
+        Returns:
+            The local PyTorch optimizer(s) to use for this Policy.
+        """
+        if hasattr(self, "config"):
+            optimizers = [
+                torch.optim.Adam(
+                    self.model.parameters(),
+                    lr=self.config["lr"],
+                    **self.config.get("optimizer", {}),
+                )
+            ]
+        else:
+            optimizers = [torch.optim.Adam(self.model.parameters())]
+        if self.exploration:
+            optimizers = self.exploration.get_exploration_optimizer(optimizers)
+        return optimizers
+
     def extra_grad_process(self, optimizer, loss):
         return apply_grad_clipping(self, optimizer, loss)
 
