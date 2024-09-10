@@ -2,7 +2,7 @@ import os
 import pickle
 import zipfile
 from logging import Logger
-from typing import Dict, List, TypedDict, cast
+from typing import Dict, List, Optional, TypedDict, cast
 
 import numpy as np
 import ray
@@ -50,14 +50,15 @@ def sacred_config():
 
     experiment_tag = "goal_predictions"  # noqa: F841
     out_dir = os.path.join(evaluate_dir, experiment_tag)  # noqa: F841
+    save_blocks_and_logits = False  # noqa: F841
 
     observer = FileStorageObserver(out_dir)
     ex.observers.append(observer)
 
 
 class GoalPredictionResult(TypedDict, total=False):
-    goal_logits: np.ndarray
-    goal_blocks: np.ndarray
+    goal_logits: Optional[np.ndarray]
+    goal_blocks: Optional[np.ndarray]
     cross_entropy: float
     cross_entropy_by_last_interacted: Dict[int, float]
     cross_entropy_different: float
@@ -74,6 +75,7 @@ def main(  # noqa: C901
     evaluate_dir: str,
     player_index: int,
     minibatch_size: int,
+    save_blocks_and_logits: bool,
     observer: FileStorageObserver,
     _log: Logger,
 ):
@@ -134,6 +136,7 @@ def main(  # noqa: C901
             policy._lazy_tensor_dict(minibatch, device=policy.devices[0])
             minibatch.set_training(False)
 
+            model.eval()
             _, state_out = model(
                 minibatch,
                 [state_piece[None] for state_piece in state_in],
@@ -185,8 +188,8 @@ def main(  # noqa: C901
 
         episode_results.append(
             {
-                "goal_logits": goal_logits,
-                "goal_blocks": goal_blocks,
+                "goal_logits": goal_logits if save_blocks_and_logits else None,
+                "goal_blocks": goal_blocks if save_blocks_and_logits else None,
                 "cross_entropy": cross_entropy,
                 "cross_entropy_by_last_interacted": cross_entropy_by_last_interacted,
                 "cross_entropy_different": cross_entropy_different,
