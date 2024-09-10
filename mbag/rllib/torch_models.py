@@ -690,7 +690,7 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
                     self._backbone_out = backbone(self._backbone_in)
                     if self.use_per_location_lstm:
                         self._backbone_out, state = self._run_lstm(
-                            self._backbone_out, state, seq_lens
+                            self._backbone_out.float(), state, seq_lens
                         )
 
             self._backbone_out_shape = self._backbone_out.size()[1:]
