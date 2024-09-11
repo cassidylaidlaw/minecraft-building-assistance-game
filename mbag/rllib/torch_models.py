@@ -25,10 +25,13 @@ from ray.rllib.models.preprocessors import get_preprocessor
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
 from ray.rllib.policy.rnn_sequencing import add_time_dimension
 from ray.rllib.policy.sample_batch import SampleBatch
+from ray.rllib.policy.torch_policy import TorchPolicy
+from ray.rllib.policy.torch_policy_v2 import TorchPolicyV2
 from ray.rllib.policy.view_requirement import ViewRequirement
+from ray.rllib.utils.exploration.exploration import Exploration
 from ray.rllib.utils.numpy import convert_to_numpy
 from ray.rllib.utils.torch_utils import convert_to_torch_tensor
-from ray.rllib.utils.typing import TensorType
+from ray.rllib.utils.typing import AlgorithmConfigDict, TensorType
 from torch import nn
 from typing_extensions import TypedDict
 
@@ -253,7 +256,7 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
         )
 
         if self.use_fc_after_embedding:
-            self.fc_after_embedding = Conv3d1x1x1(
+            self.fc_after_embedding: nn.Module = Conv3d1x1x1(
                 self._get_embedding_channels(), self.hidden_size
             )
 
@@ -773,6 +776,14 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
         input_dict = {
             SampleBatch.OBS: restore_original_dimensions(obs, self.obs_space, "torch"),
         }
+        tensor_state_in = [
+            (
+                torch.from_numpy(state).to(self.device)
+                if isinstance(state, np.ndarray)
+                else state
+            )
+            for state in state_in
+        ]
 
         if action_mask is not None:
             action_mask = convert_to_torch_tensor(action_mask)
@@ -781,7 +792,7 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
         with torch.no_grad():
             logits, state_out = self.forward(
                 input_dict,
-                state_in,
+                tensor_state_in,
                 np.ones(batch_size, dtype=int),
                 mask_logits=False,
             )
@@ -1560,6 +1571,11 @@ class MbagTransformerModel(MbagTorchModel):
             None, None, :
         ]
 
+        if not self.use_separated_transformer:
+            self.fc_after_embedding = nn.Linear(
+                self._get_embedding_channels(), self.hidden_size
+            )
+
     def _get_embedding_channels(self) -> int:
         return super()._get_embedding_channels() + self.position_embedding_size
 
@@ -1895,3 +1911,73 @@ class MbagTransformerModelWithDiscriminator(MbagTransformerModel, DiscriminatorM
 ModelCatalog.register_custom_model(
     "mbag_transformer_with_discriminator_model", MbagTransformerModelWithDiscriminator
 )
+
+
+def _optimizer(
+    config: Optional[AlgorithmConfigDict],
+    model: Optional[TorchModelV2],
+    exploration: Optional[Exploration],
+) -> Union[List[torch.optim.Optimizer], torch.optim.Optimizer]:
+    """Customize the local PyTorch optimizer(s) to use.
+
+    Args:
+        config: The Policy's config dict.
+        model: PyTorch policy module. Given observations as
+            input, this module must return a list of outputs where the
+            first item is action logits, and the rest can be any value.
+        exploration: The Policy's exploration strategy.
+
+    Returns:
+        The local PyTorch optimizer(s) to use for this Policy.
+
+    Raises:
+        ValueError: If the model is None.
+        ValueError: If the model does not inherit from torch.nn.Module.
+    """
+    if model is None:
+        raise ValueError("Model is required to create optimizer.")
+    if not isinstance(model, nn.Module):
+        raise ValueError(
+            "Model must be an instance of torch.nn.Module to create optimizer."
+        )
+    module = cast(nn.Module, model)
+
+    if config is not None:
+        optimizer: torch.optim.Optimizer = torch.optim.Adam(
+            module.parameters(),
+            lr=config["lr"],
+            **config.get("optimizer", {}),
+        )
+    else:
+        optimizer = torch.optim.Adam(module.parameters())
+    optimizers = [optimizer]
+    if exploration:
+        optimizers = exploration.get_exploration_optimizer(optimizers)
+
+    return optimizers
+
+
+class OptimizerMixin(TorchPolicy):
+
+    def optimizer(
+        self,
+    ) -> Union[List[torch.optim.Optimizer], torch.optim.Optimizer]:
+        """Customize the local PyTorch optimizer(s) to use.
+
+        Returns:
+            The local PyTorch optimizer(s) to use for this Policy.
+        """
+        return _optimizer(getattr(self, "config", None), self.model, self.exploration)
+
+
+class OptimizerMixinV2(TorchPolicyV2):
+
+    def optimizer(
+        self,
+    ) -> Union[List[torch.optim.Optimizer], torch.optim.Optimizer]:
+        """Customize the local PyTorch optimizer(s) to use.
+
+        Returns:
+            The local PyTorch optimizer(s) to use for this Policy.
+        """
+        return _optimizer(getattr(self, "config", None), self.model, self.exploration)

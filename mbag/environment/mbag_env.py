@@ -498,7 +498,7 @@ class MbagEnv(object):
                     action.action_type == MbagAction.BREAK_BLOCK
                     and goal_dependent_reward >= 0
                 )
-                if not action_correct:
+                if not noop and not action_correct:
                     goal_dependent_reward += self._get_reward(
                         player_index, "incorrect_action", self.global_timestep
                     )

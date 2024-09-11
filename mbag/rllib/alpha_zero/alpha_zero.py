@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Mapping, Optional
+from typing import Dict, List, Mapping, Optional, cast
 
 import numpy as np
 from ray.rllib.algorithms.algorithm_config import NotProvided
@@ -11,15 +11,16 @@ from ray.rllib.execution.train_ops import multi_gpu_train_one_step, train_one_st
 from ray.rllib.models.modelv2 import restore_original_dimensions
 from ray.rllib.policy.policy import Policy
 from ray.rllib.policy.sample_batch import MultiAgentBatch, concat_samples
+from ray.rllib.utils.from_config import from_config
 from ray.rllib.utils.metrics import (
     NUM_AGENT_STEPS_SAMPLED,
     NUM_ENV_STEPS_SAMPLED,
     SAMPLE_TIMER,
     SYNCH_WORKER_WEIGHTS_TIMER,
 )
-from ray.rllib.utils.replay_buffers import ReplayBuffer
+from ray.rllib.utils.replay_buffers import ReplayBuffer, StorageUnit
 from ray.rllib.utils.sgd import minibatches
-from ray.rllib.utils.typing import PolicyID, ResultDict
+from ray.rllib.utils.typing import PolicyID, ResultDict, SampleBatchType
 from ray.tune.registry import register_trainable
 
 from mbag.environment.blocks import MinecraftBlocks
@@ -29,11 +30,13 @@ from ..kl_regularization import KLRegularizationMixin
 from .alpha_zero_policy import (
     EXPECTED_OWN_REWARDS,
     EXPECTED_REWARDS,
+    FOR_TRAINING_MODEL,
     GOAL_LOGITS,
     OWN_REWARDS,
     VALUE_ESTIMATES,
     MbagAlphaZeroPolicy,
 )
+from .replay_buffer import PartialReplayBuffer
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +45,17 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
     def __init__(self, algo_class=None):
         super().__init__(algo_class)
 
+        self.use_model_replay_buffer = False
+        self.model_replay_buffer_config: dict = {
+            "type": "MultiAgentReplayBuffer",
+            "capacity": 1_000,
+            "storage_unit": StorageUnit.SEQUENCES,
+            "underlying_buffer_config": {
+                "type": PartialReplayBuffer,
+                "storage_probability": 0.1,
+            },
+        }
+        self.model_train_batch_size: int = self.train_batch_size
         self.sample_batch_size = 1000
         self.policy_loss_coeff = 1.0
         self.vf_loss_coeff = 1.0
@@ -53,7 +67,7 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
         self.use_critic = True
         self.use_goal_predictor = True
         self.use_replay_buffer = True
-        self.num_steps_sampled_before_learning_starts = 0
+        self.num_steps_sampled_before_learning_starts: int = 0
         self.anchor_policy_mapping: Mapping[PolicyID, PolicyID] = {}
         self.anchor_policy_kl_coeff = 0.0
         self.pretrain = False
@@ -62,9 +76,12 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
 
         del self.vf_share_layers
 
-    def training(
+    def training(  # noqa: C901
         self,
         *args,
+        use_model_replay_buffer=NotProvided,
+        model_replay_buffer_config=NotProvided,
+        model_train_batch_size=NotProvided,
         sample_batch_size=NotProvided,
         policy_loss_coeff=NotProvided,
         vf_loss_coeff=NotProvided,
@@ -87,6 +104,12 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
         """
         Set training parameters.
         Args:
+            use_model_replay_buffer (bool): Whether to use a separate training buffer
+                to train the model parts of the network (i.e., goal and other agent
+                action prediction).
+            model_replay_buffer_config (dict): Config for the model replay buffer.
+            model_train_batch_size (int): Number of samples to include in each
+                training batch from the model replay buffer.
             sample_batch_size (int): Number of samples to include in each
                 training batch.
             policy_loss_coeff (float): Coefficient of the policy loss.
@@ -120,6 +143,12 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
 
         super().training(*args, **kwargs)
 
+        if use_model_replay_buffer is not NotProvided:
+            self.use_model_replay_buffer = use_model_replay_buffer
+        if model_replay_buffer_config is not NotProvided:
+            self.model_replay_buffer_config.update(model_replay_buffer_config)
+        if model_train_batch_size is not NotProvided:
+            self.model_train_batch_size = model_train_batch_size
         if sample_batch_size is not NotProvided:
             self.sample_batch_size = sample_batch_size
         if policy_loss_coeff is not NotProvided:
@@ -159,6 +188,8 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
         if _strict_mode is not NotProvided:
             self._strict_mode = _strict_mode
 
+        return self
+
     def update_from_dict(self, config_dict):
         if "mcts_config" in config_dict and isinstance(config_dict, dict):
             self.mcts_config.update(config_dict["mcts_config"])
@@ -169,6 +200,7 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
 
 class MbagAlphaZero(AlphaZero, KLRegularizationMixin):
     local_replay_buffer: Optional[ReplayBuffer]  # type: ignore[assignment]
+    model_replay_buffer: Optional[ReplayBuffer]
 
     def __init__(self, config: MbagAlphaZeroConfig, *args, **kwargs):
         del config.ranked_rewards
@@ -177,6 +209,15 @@ class MbagAlphaZero(AlphaZero, KLRegularizationMixin):
 
         if not config.use_replay_buffer:
             self.local_replay_buffer = None
+        else:
+            assert self.local_replay_buffer is not None
+
+        if config.use_model_replay_buffer:
+            self.model_replay_buffer = from_config(
+                ReplayBuffer, config["model_replay_buffer_config"]
+            )
+        else:
+            self.model_replay_buffer = None
 
         self._have_set_policies_training = False
 
@@ -319,6 +360,57 @@ class MbagAlphaZero(AlphaZero, KLRegularizationMixin):
 
         return metrics_by_policy
 
+    def _combine_train_batches(
+        self,
+        policy_train_batch: MultiAgentBatch,
+        model_train_batch: MultiAgentBatch,
+    ) -> MultiAgentBatch:
+        combined_policy_batches: Dict[PolicyID, SampleBatch] = {}
+
+        for policy_id in (
+            policy_train_batch.policy_batches.keys()
+            | model_train_batch.policy_batches.keys()
+        ):
+            policy_batch = policy_train_batch.policy_batches[policy_id]
+            model_batch = model_train_batch.policy_batches[policy_id]
+            policy_batch[FOR_TRAINING_MODEL] = np.zeros(
+                len(policy_batch[SampleBatch.REWARDS]), dtype=bool
+            )
+            model_batch[FOR_TRAINING_MODEL] = np.ones(
+                len(model_batch[SampleBatch.REWARDS]), dtype=bool
+            )
+
+            policy_batch_sequences: List[SampleBatch] = []
+            seq_start = 0
+            assert not policy_batch.zero_padded
+            for seq_len in policy_batch["seq_lens"]:
+                seq_end = seq_start + seq_len
+                policy_batch_sequences.append(policy_batch.slice(seq_start, seq_end))
+                seq_start = seq_end
+            assert seq_start == policy_batch.count
+
+            model_batch_sequences: List[SampleBatch] = []
+            seq_start = 0
+            assert not model_batch.zero_padded
+            for seq_len in model_batch["seq_lens"]:
+                seq_end = seq_start + seq_len
+                model_batch_sequences.append(model_batch.slice(seq_start, seq_end))
+                seq_start = seq_end
+            assert seq_start == model_batch.count
+
+            combined_sequences = policy_batch_sequences + model_batch_sequences
+            np.random.shuffle(combined_sequences)  # type: ignore
+            combined_batch = concat_samples(
+                cast(List[SampleBatchType], combined_sequences)
+            )
+            assert isinstance(combined_batch, SampleBatch)
+            combined_policy_batches[policy_id] = combined_batch
+
+        return MultiAgentBatch(
+            combined_policy_batches,
+            policy_train_batch.env_steps() + model_train_batch.env_steps(),
+        )
+
     def training_step(self) -> ResultDict:
         assert self.workers is not None
         assert isinstance(self.config, MbagAlphaZeroConfig)
@@ -371,16 +463,15 @@ class MbagAlphaZero(AlphaZero, KLRegularizationMixin):
         # Store new samples in the replay buffer.
         if self.local_replay_buffer is not None:
             with self._timers["replay_buffer"]:
-                # First, remove non-trainable policies.
-                policy_ids_to_train = (
-                    self.workers.local_worker().foreach_policy_to_train(
-                        lambda policy, policy_id, **kwargs: policy_id
-                    )
-                )
+                # First, remove non-trainable policies and get rid of info dicts.
                 for policy_id in list(new_sample_batch.policy_batches.keys()):
-                    if policy_id not in policy_ids_to_train:
+                    del new_sample_batch.policy_batches[policy_id][SampleBatch.INFOS]
+                    if not self.workers.local_worker().is_policy_to_train(policy_id):
                         del new_sample_batch.policy_batches[policy_id]
                 self.local_replay_buffer.add(new_sample_batch)
+
+                if self.model_replay_buffer is not None:
+                    self.model_replay_buffer.add(new_sample_batch)
 
                 cur_ts = self._counters[
                     (
@@ -391,9 +482,23 @@ class MbagAlphaZero(AlphaZero, KLRegularizationMixin):
                 ]
 
                 if cur_ts > self.config.num_steps_sampled_before_learning_starts:
-                    train_batch = self.local_replay_buffer.sample(
+                    policy_train_batch = self.local_replay_buffer.sample(
                         self.config.train_batch_size
                     )
+                    if self.model_replay_buffer is not None:
+                        model_train_batch = self.model_replay_buffer.sample(
+                            self.config.model_train_batch_size
+                        )
+                        assert (
+                            policy_train_batch is not None
+                            and model_train_batch is not None
+                        )
+                        train_batch = self._combine_train_batches(
+                            policy_train_batch.as_multi_agent(),
+                            model_train_batch.as_multi_agent(),
+                        )
+                    else:
+                        train_batch = policy_train_batch
                 else:
                     train_batch = None
         else:

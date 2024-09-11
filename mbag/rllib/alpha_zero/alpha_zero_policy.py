@@ -32,7 +32,12 @@ from mbag.environment.types import CURRENT_BLOCKS, GOAL_BLOCKS, MbagInfoDict, Wo
 
 from ..kl_regularization import ANCHOR_POLICY_ACTION_DIST_INPUTS
 from ..rllib_env import unwrap_mbag_env
-from ..torch_models import ACTION_MASK, MbagTorchModel, OtherAgentActionPredictorMixin
+from ..torch_models import (
+    ACTION_MASK,
+    MbagTorchModel,
+    OptimizerMixin,
+    OtherAgentActionPredictorMixin,
+)
 from .mcts import MbagMCTS, MbagMCTSNode, MbagRootParentNode
 from .planning import MbagEnvModel
 
@@ -46,12 +51,15 @@ GOAL_LOGITS = "goal_logits"
 FORCE_NOOP = "force_noop"
 C_PUCT = "c_puct"
 PREV_C_PUCT = "prev_c_puct"
+FOR_TRAINING_MODEL = "for_training_model"
 
 
 logger = logging.getLogger(__name__)
 
 
-class MbagAlphaZeroPolicy(EntropyCoeffSchedule, LearningRateSchedule, AlphaZeroPolicy):
+class MbagAlphaZeroPolicy(
+    EntropyCoeffSchedule, LearningRateSchedule, OptimizerMixin, AlphaZeroPolicy
+):
     mcts: MbagMCTS
     envs: List[MbagEnvModel]
     config: Dict[str, Any]
@@ -309,7 +317,10 @@ class MbagAlphaZeroPolicy(EntropyCoeffSchedule, LearningRateSchedule, AlphaZeroP
         for state_index in range(model_state_len):
             state_out.append(
                 np.stack(
-                    [node.model_state_out[state_index].cpu().numpy() for node in nodes],
+                    [
+                        convert_to_numpy(node.model_state_out[state_index])
+                        for node in nodes
+                    ],
                     axis=0,
                 )
             )
@@ -586,25 +597,40 @@ class MbagAlphaZeroPolicy(EntropyCoeffSchedule, LearningRateSchedule, AlphaZeroP
             )
             assert isinstance(mask, torch.Tensor)
             mask = torch.reshape(mask, [-1])
-            num_valid = torch.sum(mask)
-
-            def reduce_mean_valid(t):
-                return torch.sum(t[mask]) / num_valid
 
         # non-RNN case: No masking.
         else:
             mask = None
-            reduce_mean_valid = torch.mean
+
+        policy_mask: torch.Tensor
+        model_mask: torch.Tensor
+        if FOR_TRAINING_MODEL in train_batch:
+            policy_mask = cast(torch.Tensor, ~train_batch[FOR_TRAINING_MODEL])
+            model_mask = cast(torch.Tensor, train_batch[FOR_TRAINING_MODEL])
+        else:
+            policy_mask = torch.ones_like(values, dtype=torch.bool)
+            model_mask = torch.ones_like(values, dtype=torch.bool)
+        if mask is not None:
+            policy_mask = policy_mask & mask
+            model_mask = model_mask & mask
+        num_policy = torch.sum(policy_mask)
+        num_model = torch.sum(model_mask)
+
+        def reduce_mean_policy(t):
+            return torch.sum(t[policy_mask]) / num_policy
+
+        def reduce_mean_model(t):
+            return torch.sum(t[model_mask]) / num_model
 
         # Compute actor and critic losses.
-        policy_loss = reduce_mean_valid(
+        policy_loss = reduce_mean_policy(
             -torch.sum(train_batch[MCTS_POLICIES] * dist.dist.logits, dim=-1)
         )
-        value_loss = reduce_mean_valid(
+        value_loss = reduce_mean_policy(
             (values - train_batch[Postprocessing.VALUE_TARGETS]) ** 2
         )
 
-        entropy = reduce_mean_valid(dist.entropy())
+        entropy = reduce_mean_policy(dist.entropy())
 
         # Compute goal prediction loss.
         goal_logits: torch.Tensor = model.goal_predictor()
@@ -616,7 +642,7 @@ class MbagAlphaZeroPolicy(EntropyCoeffSchedule, LearningRateSchedule, AlphaZeroP
         goal = world_obs[:, GOAL_BLOCKS].long()
         ce = nn.CrossEntropyLoss(reduction="none")
         goal_ce: torch.Tensor = ce(goal_logits, goal)
-        goal_loss = reduce_mean_valid(goal_ce.flatten(start_dim=1).mean(dim=1))
+        goal_loss = reduce_mean_model(goal_ce.flatten(start_dim=1).mean(dim=1))
 
         unplaced_blocks = (goal != MinecraftBlocks.AIR) & (
             world_obs[:, CURRENT_BLOCKS] == MinecraftBlocks.AIR
@@ -630,11 +656,18 @@ class MbagAlphaZeroPolicy(EntropyCoeffSchedule, LearningRateSchedule, AlphaZeroP
                 end_dim=3
             )
             flat_goal_logits = goal_logits.permute(0, 2, 3, 4, 1).flatten(end_dim=3)
-            prev_goal_kl = F.kl_div(
-                F.log_softmax(flat_goal_logits, dim=1),
-                F.log_softmax(prev_goal_logits, dim=1),
-                reduction="batchmean",
-                log_target=True,
+            prev_goal_kl = (
+                F.kl_div(
+                    F.log_softmax(flat_goal_logits, dim=1),
+                    F.log_softmax(prev_goal_logits, dim=1),
+                    reduction="none",
+                    log_target=True,
+                )
+                .sum(dim=1)
+                .reshape_as(goal_ce)
+            )
+            prev_goal_kl = reduce_mean_model(
+                prev_goal_kl.flatten(start_dim=1).mean(dim=1)
             )
 
         # Compute total loss.
@@ -663,7 +696,7 @@ class MbagAlphaZeroPolicy(EntropyCoeffSchedule, LearningRateSchedule, AlphaZeroP
                 other_agent_action_dist_inputs,  # type: ignore
                 model=model,
             )
-            other_agent_action_predictor_loss = reduce_mean_valid(
+            other_agent_action_predictor_loss = reduce_mean_model(
                 actual_other_agent_action_dist.kl(predicted_other_agent_action_dist)
             )
 
@@ -686,7 +719,9 @@ class MbagAlphaZeroPolicy(EntropyCoeffSchedule, LearningRateSchedule, AlphaZeroP
                 cast(Any, anchor_policy_action_dist_inputs), model
             )
 
-            anchor_policy_kl = action_dist.kl(anchor_policy_action_dist).mean()
+            anchor_policy_kl = reduce_mean_policy(
+                action_dist.kl(anchor_policy_action_dist)
+            )
             model.tower_stats["anchor_policy_kl"] = anchor_policy_kl.detach()
             total_loss = (
                 total_loss + self.config["anchor_policy_kl_coeff"] * anchor_policy_kl

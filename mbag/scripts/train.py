@@ -42,6 +42,7 @@ from mbag.environment.goals.transforms import (
     CropTransformConfig,
 )
 from mbag.rllib.alpha_zero import MbagAlphaZeroConfig, MbagAlphaZeroPolicy
+from mbag.rllib.alpha_zero.replay_buffer import PartialReplayBuffer
 from mbag.rllib.bc import BCConfig, BCTorchPolicy
 from mbag.rllib.callbacks import MbagCallbacks
 from mbag.rllib.data_augmentation import randomly_permute_block_types
@@ -319,6 +320,11 @@ def sacred_config(_log):  # noqa
     compress_observations = True
     use_replay_buffer = True
     replay_buffer_size = 10
+    replay_buffer_storage_unit = StorageUnit.FRAGMENTS
+    use_model_replay_buffer = False
+    model_replay_buffer_size = replay_buffer_size
+    model_replay_buffer_storage_probability = 0.1
+    model_train_batch_size = train_batch_size
     use_critic = True
     use_goal_predictor = True
     other_agent_action_predictor_loss_coeff = 1.0
@@ -358,15 +364,16 @@ def sacred_config(_log):  # noqa
     place_block_loss_coeff_schedule = None
     predict_goal_using_next_state = False
     predict_goal_using_average = False
+    store_model_state_in_torch = False
 
     # Model
     model: Literal["convolutional", "recurrent_convolutional", "transformer"] = (
         "convolutional"
     )
     max_seq_len = horizon
-    embedding_size = 8
-    position_embedding_size = 18
-    position_embedding_angle = 10000
+    embedding_size = 16
+    position_embedding_size = 48
+    position_embedding_angle = 10
     mask_goal = False
     num_inventory_obs = num_players
     mask_other_players = num_players == 1
@@ -738,6 +745,7 @@ def sacred_config(_log):  # noqa
             "explore_noops": explore_noops,
             "predict_goal_using_next_state": predict_goal_using_next_state,
             "predict_goal_using_average": predict_goal_using_average,
+            "store_model_state_in_torch": store_model_state_in_torch,
         }
         if temperature_start != temperature_end:
             mcts_config["temperature_schedule"] = [
@@ -750,6 +758,7 @@ def sacred_config(_log):  # noqa
             grad_clip=grad_clip,
             gamma=gamma,
             train_batch_size=train_batch_size,
+            model_train_batch_size=model_train_batch_size,
             sgd_minibatch_size=sgd_minibatch_size,
             num_sgd_iter=num_sgd_iter,
             policy_loss_coeff=policy_loss_coeff,
@@ -770,7 +779,20 @@ def sacred_config(_log):  # noqa
             replay_buffer_config={
                 "type": "MultiAgentReplayBuffer",
                 "capacity": replay_buffer_size,
-                "storage_unit": StorageUnit.FRAGMENTS,
+                "storage_unit": replay_buffer_storage_unit,
+                "replay_sequence_override": False,
+                "replay_sequence_length": 0,
+            },
+            use_model_replay_buffer=use_model_replay_buffer,
+            model_replay_buffer_config={
+                "capacity": model_replay_buffer_size,
+                "storage_unit": replay_buffer_storage_unit,
+                "replay_sequence_override": False,
+                "replay_sequence_length": 0,
+                "underlying_buffer_config": {
+                    "type": PartialReplayBuffer,
+                    "storage_probability": model_replay_buffer_storage_probability,
+                },
             },
             pretrain=pretrain,
             anchor_policy_mapping=anchor_policy_mapping,
@@ -843,6 +865,9 @@ def sacred_config(_log):  # noqa
     observer = NoTypeAnnotationsFileStorageObserver(experiment_dir)
     ex.observers.append(observer)
 
+    # For testing
+    _no_train = False  # noqa: F841
+
     # Extra args that are ignored here but used in some of the named configs.
     checkpoint_name = None  # noqa: F841
     data_split = None  # noqa: F841
@@ -864,6 +889,7 @@ def main(
     load_policies_mapping: Dict[str, str],
     observer,
     ray_init_options,
+    _no_train: bool,
     _log: Logger,
 ):
     temp_dir = tempfile.mkdtemp()
@@ -931,13 +957,14 @@ def main(
         trainer.restore(checkpoint_path)
 
     result = None
-    for train_iter in range(num_training_iters):
-        _log.info(f"Starting training iteration {train_iter}")
-        result = trainer.train()
+    if not _no_train:
+        for train_iter in range(num_training_iters):
+            _log.info(f"Starting training iteration {train_iter}")
+            result = trainer.train()
 
-        if trainer.iteration % save_freq == 0:
-            checkpoint = trainer.save()
-            _log.info(f"Saved checkpoint to {checkpoint}")
+            if trainer.iteration % save_freq == 0:
+                checkpoint = trainer.save()
+                _log.info(f"Saved checkpoint to {checkpoint}")
 
     checkpoint = trainer.save()
     _log.info(f"Saved final checkpoint to {checkpoint}")

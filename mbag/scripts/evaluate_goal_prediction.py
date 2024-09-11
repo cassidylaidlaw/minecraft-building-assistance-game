@@ -95,6 +95,7 @@ def main(  # noqa: C901
     assert isinstance(policy, (TorchPolicy, TorchPolicyV2))
     model = policy.model
     assert isinstance(model, MbagTorchModel)
+    model.eval()
 
     with zipfile.ZipFile(os.path.join(evaluate_dir, "episodes.zip")) as episodes_zip:
         with episodes_zip.open("episodes.pickle") as episodes_file:
@@ -136,12 +137,12 @@ def main(  # noqa: C901
             policy._lazy_tensor_dict(minibatch, device=policy.devices[0])
             minibatch.set_training(False)
 
-            model.eval()
-            _, state_out = model(
-                minibatch,
-                [state_piece[None] for state_piece in state_in],
-                np.array([len(minibatch)]),
-            )
+            with torch.no_grad():
+                _, state_out = model(
+                    minibatch,
+                    [state_piece[None] for state_piece in state_in],
+                    np.array([len(minibatch)]),
+                )
             goal_logits_batch = model.goal_predictor().cpu().detach().numpy()
             goal_logits_batches.append(goal_logits_batch)
 

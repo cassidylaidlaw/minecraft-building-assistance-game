@@ -749,6 +749,7 @@
       "rewards": {
         "action": 0,
         "get_resources": 0,
+        "incorrect_action": 0,
         "noop": 0,
         "own_reward_prop": 0,
         "place_wrong": -1
@@ -764,6 +765,15 @@
     "env_task_fn": null,
     "evaluation_config": {
       "env_config": {
+        "num_players": 1,
+        "players": [
+          {
+            "goal_visible": true,
+            "is_human": false,
+            "rewards": {},
+            "timestep_skip": 1
+          }
+        ],
         "randomize_first_episode_length": false
       },
       "explore": true,
@@ -773,7 +783,7 @@
     "evaluation_duration_unit": "episodes",
     "evaluation_interval": 1,
     "evaluation_num_episodes": -1,
-    "evaluation_num_workers": 8,
+    "evaluation_num_workers": 0,
     "evaluation_parallel_to_training": false,
     "evaluation_sample_timeout_s": 180.0,
     "exploration_config": {
@@ -790,7 +800,7 @@
     "grad_clip_by": "global_norm",
     "ignore_worker_failures": false,
     "in_evaluation": false,
-    "input_": "data/human_data_cleaned/human_alone/infinite_blocks_true/rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_0",
+    "input_": "data/human_data_cleaned/human_alone/infinite_blocks_true/rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_0_inventory_0",
     "input_config": {},
     "input_evaluation": -1,
     "keep_per_episode_custom_metrics": false,
@@ -891,7 +901,9 @@
     "off_policy_estimation_methods": {},
     "offline_sampling": false,
     "ope_split_batch_by_episode": true,
-    "optimizer": {},
+    "optimizer": {
+      "weight_decay": 0
+    },
     "output": null,
     "output_compress_columns": [
       "obs",
@@ -929,7 +941,8 @@
             "custom_action_dist": "mbag_bilevel_categorical",
             "custom_model": "mbag_transformer_model",
             "custom_model_config": {
-              "embedding_size": 8,
+              "dim_feedforward": 64,
+              "embedding_size": 16,
               "env_config": {
                 "abilities": {
                   "flying": true,
@@ -1020,8 +1033,9 @@
                 "randomize_first_episode_length": true,
                 "rewards": {
                   "action": 0,
-                  "get_resources": 0.0,
-                  "noop": 0.0,
+                  "get_resources": 0,
+                  "incorrect_action": 0,
+                  "noop": 0,
                   "own_reward_prop": 0,
                   "place_wrong": -1
                 },
@@ -1032,6 +1046,7 @@
                   10
                 ]
               },
+              "fix_interleave_lstm": true,
               "hidden_size": 64,
               "interleave_lstm": false,
               "line_of_sight_masking": true,
@@ -1039,15 +1054,20 @@
               "mask_action_distribution": true,
               "mask_goal": false,
               "mask_other_players": true,
+              "norm_first": false,
               "num_action_layers": 2,
               "num_heads": 4,
+              "num_inventory_obs": 1,
               "num_layers": 6,
               "num_lstm_layers": 1,
               "num_value_layers": 2,
-              "position_embedding_size": 18,
+              "position_embedding_angle": 10,
+              "position_embedding_size": 48,
               "scale_obs": true,
               "use_extra_features": true,
+              "use_fc_after_embedding": true,
               "use_per_location_lstm": false,
+              "use_prev_action": false,
               "use_prev_blocks": false,
               "use_separated_transformer": true,
               "vf_scale": 1.0
@@ -1219,7 +1239,7 @@
                   "py/tuple": []
                 },
                 "bounded_above": {
-                  "py/id": 67
+                  "py/id": 31
                 },
                 "bounded_below": {
                   "dtype": "bool",
@@ -1227,7 +1247,7 @@
                   "value": true
                 },
                 "dtype": {
-                  "py/id": 53
+                  "py/id": 17
                 },
                 "high": {
                   "dtype": "int32",

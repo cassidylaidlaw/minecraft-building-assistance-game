@@ -3,6 +3,7 @@ This files contains tests that run the entire experiment pipeline (with zero act
 training). It ensures that all configs match and that the pipeline runs without errors.
 """
 
+import copy
 import glob
 import json
 import logging
@@ -38,12 +39,20 @@ def remove_py_id(obj):
 def assert_config_matches(
     experiment_dir,
     reference_experiment_dir,
+    overwrite=False,
 ):
     with open(os.path.join(experiment_dir, "config.json")) as config_file:
         json_config = json.load(config_file)
 
     with open(os.path.join(reference_experiment_dir, "config.json")) as config_file:
         reference_json_config = json.load(config_file)
+
+    if overwrite:
+        reference_json_config["config"] = copy.deepcopy(json_config["config"])
+        with open(
+            os.path.join(reference_experiment_dir, "config.json"), "w"
+        ) as config_file:
+            json.dump(reference_json_config, config_file, indent=2)
 
     json_config["config"] = remove_py_id(json_config["config"])
     reference_json_config["config"] = remove_py_id(reference_json_config["config"])
@@ -109,7 +118,7 @@ def test_experiments(tmp_path):
     mbag.environment.goals.logger.setLevel(logging.WARNING)
 
     common_config_updates = {
-        "num_training_iters": 0,
+        "_no_train": True,
         "num_workers": 0,
         "evaluation_num_workers": 0,
     }

@@ -48,7 +48,7 @@ from ray.util.debug import log_once
 from torch import nn
 
 from .bc import BC
-from .torch_models import MbagTorchModel, ModelWithDiscriminator
+from .torch_models import MbagTorchModel, ModelWithDiscriminator, OptimizerMixinV2
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ logger = logging.getLogger(__name__)
 IS_DEMONSTRATION = "is_demonstration"
 
 
-class MbagGAILTorchPolicy(PPOTorchPolicy):
+class MbagGAILTorchPolicy(OptimizerMixinV2, PPOTorchPolicy):
     def __init__(self, observation_space, action_space, config):
         PPOTorchPolicy.__init__(
             self,

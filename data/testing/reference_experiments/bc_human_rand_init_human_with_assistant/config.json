@@ -145,12 +145,18 @@
       "malmo": {
         "use_malmo": false
       },
-      "num_players": 1,
+      "num_players": 2,
       "players": [
         {
           "goal_visible": true,
           "is_human": false,
           "player_name": "human",
+          "rewards": {},
+          "timestep_skip": 1
+        },
+        {
+          "goal_visible": true,
+          "is_human": false,
           "rewards": {},
           "timestep_skip": 1
         }
@@ -160,6 +166,7 @@
       "rewards": {
         "action": 0,
         "get_resources": 0,
+        "incorrect_action": 0,
         "noop": 0,
         "own_reward_prop": 0,
         "place_wrong": -1
@@ -175,6 +182,15 @@
     "env_task_fn": null,
     "evaluation_config": {
       "env_config": {
+        "num_players": 1,
+        "players": [
+          {
+            "goal_visible": true,
+            "is_human": false,
+            "rewards": {},
+            "timestep_skip": 1
+          }
+        ],
         "randomize_first_episode_length": false
       },
       "explore": true,
@@ -184,7 +200,7 @@
     "evaluation_duration_unit": "episodes",
     "evaluation_interval": 1,
     "evaluation_num_episodes": -1,
-    "evaluation_num_workers": 8,
+    "evaluation_num_workers": 0,
     "evaluation_parallel_to_training": false,
     "evaluation_sample_timeout_s": 180.0,
     "exploration_config": {
@@ -201,7 +217,7 @@
     "grad_clip_by": "global_norm",
     "ignore_worker_failures": false,
     "in_evaluation": false,
-    "input_": "data/human_data_cleaned/human_with_assistant/infinite_blocks_true/rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_0",
+    "input_": "data/human_data_cleaned/human_with_assistant/infinite_blocks_true/rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_1_inventory_0_1",
     "input_config": {},
     "input_evaluation": -1,
     "keep_per_episode_custom_metrics": false,
@@ -222,7 +238,7 @@
         0.001
       ],
       [
-        94790,
+        97590,
         0.0001
       ]
     ],
@@ -302,7 +318,9 @@
     "off_policy_estimation_methods": {},
     "offline_sampling": false,
     "ope_split_batch_by_episode": true,
-    "optimizer": {},
+    "optimizer": {
+      "weight_decay": 0
+    },
     "output": null,
     "output_compress_columns": [
       "obs",
@@ -340,7 +358,8 @@
             "custom_action_dist": "categorical_no_inf",
             "custom_model": "mbag_transformer_model",
             "custom_model_config": {
-              "embedding_size": 8,
+              "dim_feedforward": 64,
+              "embedding_size": 16,
               "env_config": {
                 "abilities": {
                   "flying": true,
@@ -417,12 +436,18 @@
                 "malmo": {
                   "use_malmo": false
                 },
-                "num_players": 1,
+                "num_players": 2,
                 "players": [
                   {
                     "goal_visible": true,
                     "is_human": false,
                     "player_name": "human",
+                    "rewards": {},
+                    "timestep_skip": 1
+                  },
+                  {
+                    "goal_visible": true,
+                    "is_human": false,
                     "rewards": {},
                     "timestep_skip": 1
                   }
@@ -432,6 +457,7 @@
                 "rewards": {
                   "action": 0,
                   "get_resources": 0,
+                  "incorrect_action": 0,
                   "noop": 0,
                   "own_reward_prop": 0,
                   "place_wrong": -1
@@ -443,6 +469,7 @@
                   10
                 ]
               },
+              "fix_interleave_lstm": true,
               "hidden_size": 64,
               "interleave_lstm": false,
               "line_of_sight_masking": true,
@@ -450,15 +477,20 @@
               "mask_action_distribution": true,
               "mask_goal": false,
               "mask_other_players": false,
+              "norm_first": false,
               "num_action_layers": 2,
               "num_heads": 4,
+              "num_inventory_obs": 2,
               "num_layers": 6,
               "num_lstm_layers": 1,
               "num_value_layers": 2,
-              "position_embedding_size": 18,
+              "position_embedding_angle": 10,
+              "position_embedding_size": 48,
               "scale_obs": true,
               "use_extra_features": true,
+              "use_fc_after_embedding": true,
               "use_per_location_lstm": false,
+              "use_prev_action": false,
               "use_prev_blocks": false,
               "use_separated_transformer": true,
               "vf_scale": 1.0
@@ -540,86 +572,52 @@
                 "_np_random": null,
                 "_shape": {
                   "py/tuple": [
-                    1,
+                    2,
                     10
                   ]
                 },
                 "bounded_above": {
                   "dtype": "bool",
                   "py/object": "numpy.ndarray",
-                  "values": [
-                    [
-                      true,
-                      true,
-                      true,
-                      true,
-                      true,
-                      true,
-                      true,
-                      true,
-                      true,
-                      true
-                    ]
-                  ]
+                  "shape": [
+                    2,
+                    10
+                  ],
+                  "values": "eJxjZMQEAADmABU="
                 },
                 "bounded_below": {
                   "dtype": "bool",
                   "py/object": "numpy.ndarray",
-                  "values": [
-                    [
-                      true,
-                      true,
-                      true,
-                      true,
-                      true,
-                      true,
-                      true,
-                      true,
-                      true,
-                      true
-                    ]
-                  ]
+                  "shape": [
+                    2,
+                    10
+                  ],
+                  "values": "eJxjZMQEAADmABU="
                 },
                 "dtype": {
                   "dtype": "int32",
                   "py/object": "numpy.dtype[int32]"
                 },
                 "high": {
+                  "byteorder": "<",
                   "dtype": "int32",
                   "py/object": "numpy.ndarray",
-                  "values": [
-                    [
-                      2304,
-                      2304,
-                      2304,
-                      2304,
-                      2304,
-                      2304,
-                      2304,
-                      2304,
-                      2304,
-                      2304
-                    ]
-                  ]
+                  "shape": [
+                    2,
+                    10
+                  ],
+                  "values": "eJxj4GRgYKAiBgAdJAC1"
                 },
                 "high_repr": "2304",
                 "low": {
+                  "byteorder": "<",
                   "dtype": "int32",
                   "py/object": "numpy.ndarray",
-                  "values": [
-                    [
-                      0,
-                      0,
-                      0,
-                      0,
-                      0,
-                      0,
-                      0,
-                      0,
-                      0,
-                      0
-                    ]
-                  ]
+                  "shape": [
+                    2,
+                    10
+                  ],
+                  "values": "eJxjYKAuAAAAUAAB"
                 },
                 "low_repr": "0",
                 "py/object": "gymnasium.spaces.box.Box"
@@ -630,7 +628,7 @@
                   "py/tuple": []
                 },
                 "bounded_above": {
-                  "py/id": 67
+                  "py/id": 23
                 },
                 "bounded_below": {
                   "dtype": "bool",
@@ -638,7 +636,7 @@
                   "value": true
                 },
                 "dtype": {
-                  "py/id": 53
+                  "py/id": 17
                 },
                 "high": {
                   "dtype": "int32",
@@ -668,6 +666,9 @@
     ],
     "policy_map_cache": -1,
     "policy_map_capacity": 100,
+    "policy_mapping_fn": {
+      "py/function": "mbag.scripts.train.policy_mapping_fn"
+    },
     "policy_states_are_swappable": false,
     "postprocess_inputs": false,
     "preprocessor_pref": "deepmind",
@@ -728,7 +729,7 @@
     "torch_compile_worker": false,
     "torch_compile_worker_dynamo_backend": "onnxrt",
     "torch_compile_worker_dynamo_mode": null,
-    "train_batch_size": 9479,
+    "train_batch_size": 9759,
     "update_worker_filter_stats": true,
     "use_worker_filter_stats": true,
     "validate_workers_after_construction": true,

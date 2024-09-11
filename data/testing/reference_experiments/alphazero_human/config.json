@@ -176,6 +176,7 @@
       "rewards": {
         "action": 0,
         "get_resources": 0,
+        "incorrect_action": 0,
         "noop": -0.2,
         "own_reward_prop": 0,
         "place_wrong": -1
@@ -191,6 +192,15 @@
     "env_task_fn": null,
     "evaluation_config": {
       "env_config": {
+        "num_players": 1,
+        "players": [
+          {
+            "goal_visible": true,
+            "is_human": false,
+            "rewards": {},
+            "timestep_skip": 1
+          }
+        ],
         "randomize_first_episode_length": false
       },
       "explore": false,
@@ -211,6 +221,7 @@
         "puct_coefficient": 1,
         "sample_c_puct_every_timestep": true,
         "sample_from_full_support_policy": false,
+        "store_model_state_in_torch": false,
         "temperature": 1.5,
         "temperature_schedule": null,
         "use_bilevel_action_selection": true
@@ -272,6 +283,7 @@
       "puct_coefficient": 1,
       "sample_c_puct_every_timestep": true,
       "sample_from_full_support_policy": false,
+      "store_model_state_in_torch": false,
       "temperature": 1.5,
       "temperature_schedule": null,
       "use_bilevel_action_selection": true
@@ -331,6 +343,22 @@
       "vf_share_layers": true,
       "zero_mean": true
     },
+    "model_replay_buffer_config": {
+      "capacity": 20,
+      "replay_sequence_length": 0,
+      "replay_sequence_override": false,
+      "storage_unit": {
+        "py/id": 45
+      },
+      "type": "MultiAgentReplayBuffer",
+      "underlying_buffer_config": {
+        "storage_probability": 0.1,
+        "type": {
+          "py/type": "mbag.rllib.alpha_zero.replay_buffer.PartialReplayBuffer"
+        }
+      }
+    },
+    "model_train_batch_size": 8,
     "monitor": -1,
     "normalize_actions": true,
     "num_consecutive_worker_failures_tolerance": 100,
@@ -340,7 +368,7 @@
     "num_envs_per_worker": 8,
     "num_gpus": 0.5,
     "num_gpus_per_learner_worker": 0,
-    "num_gpus_per_worker": 0.1,
+    "num_gpus_per_worker": 0.025,
     "num_learner_workers": 0,
     "num_rollout_workers": 8,
     "num_sgd_iter": 1,
@@ -351,7 +379,9 @@
     "off_policy_estimation_methods": {},
     "offline_sampling": false,
     "ope_split_batch_by_episode": true,
-    "optimizer": {},
+    "optimizer": {
+      "weight_decay": 0
+    },
     "other_agent_action_predictor_loss_coeff": 1.0,
     "output": null,
     "output_compress_columns": [
@@ -391,7 +421,8 @@
             "custom_action_dist": "categorical_no_inf",
             "custom_model": "mbag_transformer_model",
             "custom_model_config": {
-              "embedding_size": 8,
+              "dim_feedforward": 64,
+              "embedding_size": 16,
               "env_config": {
                 "abilities": {
                   "flying": true,
@@ -483,6 +514,7 @@
                 "rewards": {
                   "action": 0,
                   "get_resources": 0,
+                  "incorrect_action": 0,
                   "noop": -0.2,
                   "own_reward_prop": 0,
                   "place_wrong": -1
@@ -494,6 +526,7 @@
                   10
                 ]
               },
+              "fix_interleave_lstm": true,
               "hidden_size": 64,
               "interleave_lstm": false,
               "line_of_sight_masking": true,
@@ -501,15 +534,20 @@
               "mask_action_distribution": true,
               "mask_goal": false,
               "mask_other_players": true,
+              "norm_first": false,
               "num_action_layers": 2,
               "num_heads": 4,
+              "num_inventory_obs": 1,
               "num_layers": 6,
               "num_lstm_layers": 1,
               "num_value_layers": 2,
-              "position_embedding_size": 18,
+              "position_embedding_angle": 10,
+              "position_embedding_size": 48,
               "scale_obs": true,
               "use_extra_features": true,
+              "use_fc_after_embedding": true,
               "use_per_location_lstm": false,
+              "use_prev_action": false,
               "use_prev_blocks": false,
               "use_separated_transformer": true,
               "vf_scale": 1.0
@@ -681,7 +719,7 @@
                   "py/tuple": []
                 },
                 "bounded_above": {
-                  "py/id": 67
+                  "py/id": 31
                 },
                 "bounded_below": {
                   "dtype": "bool",
@@ -689,7 +727,7 @@
                   "value": true
                 },
                 "dtype": {
-                  "py/id": 53
+                  "py/id": 17
                 },
                 "high": {
                   "dtype": "int32",
@@ -744,6 +782,8 @@
     "replay_batch_size": -1,
     "replay_buffer_config": {
       "capacity": 20,
+      "replay_sequence_length": 0,
+      "replay_sequence_override": false,
       "storage_unit": {
         "py/reduce": [
           {
@@ -812,6 +852,7 @@
     "update_worker_filter_stats": true,
     "use_critic": true,
     "use_goal_predictor": false,
+    "use_model_replay_buffer": false,
     "use_replay_buffer": true,
     "use_worker_filter_stats": true,
     "validate_workers_after_construction": true,

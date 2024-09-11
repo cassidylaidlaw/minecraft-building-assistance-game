@@ -41,12 +41,12 @@ from .torch_action_distributions import (
     MbagAutoregressiveActionDistribution,
     MbagBilevelCategorical,
 )
-from .torch_models import ACTION_MASK, MbagTorchModel
+from .torch_models import ACTION_MASK, MbagTorchModel, OptimizerMixinV2
 
 logger = logging.getLogger(__name__)
 
 
-class MbagPPOTorchPolicy(PPOTorchPolicy):
+class MbagPPOTorchPolicy(OptimizerMixinV2, PPOTorchPolicy):
     config: Dict[str, Any]
 
     def __init__(

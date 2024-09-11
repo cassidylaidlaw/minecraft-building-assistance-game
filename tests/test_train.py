@@ -466,6 +466,40 @@ def test_lstm_alpha_zero_assistant(
 @pytest.mark.uses_rllib
 @pytest.mark.slow
 @pytest.mark.timeout(60)
+def test_alpha_zero_with_model_replay_buffer(
+    default_config, default_alpha_zero_config, dummy_ppo_checkpoint_fname
+):
+    result = ex.run(
+        config_updates={
+            **default_config,
+            **default_alpha_zero_config,
+            "num_players": 2,
+            "mask_goal": True,
+            "use_extra_features": False,
+            "checkpoint_to_load_policies": dummy_ppo_checkpoint_fname,
+            "load_policies_mapping": {"human": "human"},
+            "policies_to_train": ["assistant"],
+            "model": "transformer_alpha_zero",
+            "use_per_location_lstm": True,
+            "use_replay_buffer": True,
+            "replay_buffer_storage_unit": "sequences",
+            "replay_buffer_size": 100,
+            "use_model_replay_buffer": True,
+            "model_replay_buffer_size": 100,
+            "train_batch_size": 20,
+            "max_seq_len": 5,
+            "sgd_minibatch_size": 20,
+            "vf_share_layers": True,
+        }
+    ).result
+    assert result is not None
+    assert result["custom_metrics"]["human/own_reward_mean"] > -10
+    assert result["custom_metrics"]["assistant/own_reward_mean"] > -10
+
+
+@pytest.mark.uses_rllib
+@pytest.mark.slow
+@pytest.mark.timeout(60)
 def test_interleaved_lstm_alpha_zero_assistant(
     default_config, default_alpha_zero_config, dummy_ppo_checkpoint_fname
 ):
@@ -496,8 +530,8 @@ def test_interleaved_lstm_alpha_zero_assistant(
 
 @pytest.mark.uses_rllib
 @pytest.mark.slow
-@pytest.mark.timeout(120)
-@pytest.mark.limit_memory("850 MB")
+@pytest.mark.timeout(600)
+@pytest.mark.limit_memory("600 MB")
 def test_lstm_alpha_zero_memory_usage(
     default_config,
     default_alpha_zero_config,
@@ -524,7 +558,9 @@ def test_lstm_alpha_zero_memory_usage(
             "max_seq_len": 10,
             "sample_batch_size": 800,
             "model": "transformer",
-            "use_per_location_lstm": True,
+            "num_layers": 4,
+            "use_separated_transformer": True,
+            "interleave_lstm": True,
             "sgd_minibatch_size": 20,
             "train_batch_size": 1,
             "vf_share_layers": True,

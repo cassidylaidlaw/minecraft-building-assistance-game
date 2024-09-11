@@ -49,7 +49,7 @@ from ray.tune.registry import register_trainable
 from torch import nn
 
 from .human_data import PARTICIPANT_ID
-from .torch_models import MbagTorchModel
+from .torch_models import MbagTorchModel, OptimizerMixin
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ class BCTorchLossesAndStats(NamedTuple):
     vf_explained_var: torch.Tensor
 
 
-class BCTorchPolicy(LearningRateSchedule, TorchPolicy):
+class BCTorchPolicy(LearningRateSchedule, OptimizerMixin, TorchPolicy):
     def __init__(self, observation_space, action_space, config):
         TorchPolicy.__init__(
             self,

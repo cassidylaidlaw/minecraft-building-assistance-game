@@ -51,8 +51,8 @@ class MbagMCTSNode:
     goal_logits: Optional[np.ndarray]
     other_agent_action_dist: Optional[np.ndarray]
     other_reward: float
-    model_state_in: List[torch.Tensor]
-    model_state_out: List[torch.Tensor]
+    model_state_in: Sequence[Union[np.ndarray, torch.Tensor]]
+    model_state_out: Sequence[Union[np.ndarray, torch.Tensor]]
     action_type_priors: np.ndarray
     noop_probability: float
 
@@ -65,7 +65,7 @@ class MbagMCTSNode:
         reward,
         state,
         mcts: "MbagMCTS",
-        model_state_in: Union[List[np.ndarray], List[torch.Tensor]],
+        model_state_in: Sequence[Union[np.ndarray, torch.Tensor]],
         parent: Union["MbagMCTSNode", MbagRootParentNode],
         c_puct: float = np.nan,
     ):
@@ -135,13 +135,16 @@ class MbagMCTSNode:
 
         assert isinstance(self.mcts.model, MbagTorchModel)
         if model_state_in:
-            tensor_model_state_in = [
-                torch.from_numpy(state) if isinstance(state, np.ndarray) else state
-                for state in model_state_in
-            ]
-            self.model_state_in = [
-                state.to(self.mcts.model.device) for state in tensor_model_state_in
-            ]
+            if self.mcts.store_model_state_in_torch:
+                tensor_model_state_in = [
+                    torch.from_numpy(state) if isinstance(state, np.ndarray) else state
+                    for state in model_state_in
+                ]
+                self.model_state_in = [
+                    state.to(self.mcts.model.device) for state in tensor_model_state_in
+                ]
+            else:
+                self.model_state_in = model_state_in
         else:
             self.model_state_in = []
 
@@ -659,6 +662,10 @@ class MbagMCTS(MCTS):
             "sample_c_puct_every_timestep", True
         )
 
+        self.store_model_state_in_torch: bool = mcts_param.get(
+            "store_model_state_in_torch", True
+        )
+
     @property
     def persist_c_puct(self):
         """
@@ -686,16 +693,27 @@ class MbagMCTS(MCTS):
             leaves: List[MbagMCTSNode] = [node.select() for node in nodes]
             obs = [leaf.obs for leaf in leaves]
             model_state_len = len(leaves[0].model_state_in)
-            model_state_in = [
-                torch.stack(
-                    [leaf.model_state_in[state_index] for leaf in leaves], dim=0
-                )
-                for state_index in range(model_state_len)
-            ]
+            model_state_in: Sequence[Union[np.ndarray, torch.Tensor]]
+            if self.store_model_state_in_torch:
+                model_state_in = []
+                for state_index in range(model_state_len):
+                    leaf_states: List[torch.Tensor] = []
+                    for leaf in leaves:
+                        state = leaf.model_state_in[state_index]
+                        assert isinstance(state, torch.Tensor)
+                        leaf_states.append(state)
+                    model_state_in.append(torch.stack(leaf_states, dim=0))
+            else:
+                model_state_in = [
+                    np.stack(
+                        [leaf.model_state_in[state_index] for leaf in leaves], axis=0
+                    )
+                    for state_index in range(model_state_len)
+                ]
             action_mask = np.stack([leaf.valid_actions for leaf in leaves])
             child_priors: np.ndarray
             values: np.ndarray
-            model_state_out: List[torch.Tensor]
+            model_state_out: List[Union[np.ndarray, torch.Tensor]]
 
             child_priors, values, model_state_out = self.model.compute_priors_and_value(
                 obs, model_state_in, action_mask=action_mask
@@ -704,6 +722,11 @@ class MbagMCTS(MCTS):
             child_priors /= child_priors.sum(axis=1, keepdims=True)
             if not self.use_critic:
                 values[:] = 0
+            if not self.store_model_state_in_torch:
+                model_state_out = [
+                    state.cpu().numpy() if isinstance(state, torch.Tensor) else state
+                    for state in model_state_out
+                ]
 
             goal_logits: Optional[np.ndarray]
             if self.use_goal_predictor:
