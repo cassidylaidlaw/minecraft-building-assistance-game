@@ -135,6 +135,7 @@ DEFAULT_ASSISTANT_ALPHAZERO_ENV_VARS = dict(
     HIDDEN_SIZE=64,
     NUM_HEADS=4,
     NORM_FIRST=False,
+    EMBEDDING_SIZE=8,
     POSITION_EMBEDDING_SIZE=18,
     POSITION_EMBEDDING_ANGLE=10000,
     DIM_FEEDFORWARD=64,
@@ -403,7 +404,14 @@ def make_common_tag(env_vars: dict, algorithm: Algorithm, agent: Agent) -> str:
         if env_vars["USE_SEPARATED_TRANSFORMER"]
         else "/no_sep_transformer"
     )
-    tag += f"/dim_feedforward_{env_vars['DIM_FEEDFORWARD']}/num_heads_{env_vars['NUM_HEADS']}/norm_first_{env_vars['NORM_FIRST']}/position_embedding_size_{env_vars['POSITION_EMBEDDING_SIZE']}/position_embedding_angle_{env_vars['POSITION_EMBEDDING_ANGLE']}"
+    tag += (
+        f"/dim_feedforward_{env_vars['DIM_FEEDFORWARD']}"
+        f"/num_heads_{env_vars['NUM_HEADS']}"
+        f"/norm_first_{env_vars['NORM_FIRST']}"
+        f"/embedding_size_{env_vars['EMBEDDING_SIZE']}"
+        f"/position_embedding_size_{env_vars['POSITION_EMBEDDING_SIZE']}"
+        f"/position_embedding_angle_{env_vars['POSITION_EMBEDDING_ANGLE']}"
+    )
     # LSTM
     use_per_location_stm = env_vars["USE_PER_LOCATION_LSTM"]
     interleave_lstm = env_vars["INTERLEAVE_LSTM"]
