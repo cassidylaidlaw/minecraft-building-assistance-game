@@ -125,8 +125,10 @@ DEFAULT_ASSISTANT_ALPHAZERO_ENV_VARS = dict(
     NUM_WORKERS=8,
     VF_SCALE=1,
     NUM_GPUS_PER_WORKER=0.08,
-    REPLAY_BUFFER_SIZE=20,
     USE_REPLAY_BUFFER=True,
+    REPLAY_BUFFER_SIZE=32768,
+    USE_MODEL_REPLAY_BUFFER=True,
+    MODEL_REPLAY_BUFFER_SIZE=131072,
     GAMMA=0.95,
     LR=0.001,
     WEIGHT_DECAY=0,
@@ -135,14 +137,14 @@ DEFAULT_ASSISTANT_ALPHAZERO_ENV_VARS = dict(
     HIDDEN_SIZE=64,
     NUM_HEADS=4,
     NORM_FIRST=False,
-    EMBEDDING_SIZE=8,
-    POSITION_EMBEDDING_SIZE=18,
-    POSITION_EMBEDDING_ANGLE=10000,
+    EMBEDDING_SIZE=16,
+    POSITION_EMBEDDING_SIZE=48,
+    POSITION_EMBEDDING_ANGLE=10,
     DIM_FEEDFORWARD=64,
     NUM_SGD_ITER=1,
     TRAIN_BATCH_SIZE=8,
     SEED=0,
-    NUM_TRAINING_ITERS=10000,
+    NUM_TRAINING_ITERS=100,
     # Don't set sample_batch_size so that it can be set explicitly in the
     # experiment config or computed in the script if unset.
     # SAMPLE_BATCH_SIZE=8000,
@@ -150,23 +152,24 @@ DEFAULT_ASSISTANT_ALPHAZERO_ENV_VARS = dict(
     NOOP_REWARD=0,
     GET_RESOURCES_REWARD=0,
     ACTION_REWARD=0,
-    ROLLOUT_FRAGMENT_LENGTH=256,
-    MAX_SEQ_LEN=256,
+    MAX_SEQ_LEN=64,
+    ROLLOUT_FRAGMENT_LENGTH=64,
     NUM_SIMULATIONS=100,
     USE_GOAL_PREDICTOR=True,
     USE_BILEVEL_ACTION_SELECTION=True,
+    FIX_BILEVEL_ACTION_SELECTION=True,
     TEMPERATURE=1.5,
     DIRICHLET_NOISE=0.25,
     PRIOR_TEMPERATURE=1.0,
     INIT_Q_WITH_MAX=False,
     PRETRAIN=False,
-    SGD_MINIBATCH_SIZE=512,
+    SGD_MINIBATCH_SIZE=1024,
     VF_LOSS_COEFF=0.01,
-    GOAL_LOSS_COEFF=0.5,
+    GOAL_LOSS_COEFF=3,
     OTHER_AGENT_ACTION_PREDICTOR_LOSS_COEFF=1.0,
     USE_SEPARATED_TRANSFORMER=True,
-    USE_PER_LOCATION_LSTM=True,
-    INTERLEAVE_LSTM=False,
+    USE_PER_LOCATION_LSTM=False,
+    INTERLEAVE_LSTM=True,
     # Optional env vars. These are set to None and then converted to empty
     # strings for the shell command, which makes the env var unset.
     TRUNCATE_ON_NO_PROGRESS_TIMESTEPS=None,
@@ -385,11 +388,20 @@ def make_common_tag(env_vars: dict, algorithm: Algorithm, agent: Agent) -> str:
 
     tag += f"/sgd_minibatch_{env_vars['SGD_MINIBATCH_SIZE']}"
 
+    # Replay buffer(s)
     if algorithm == "alphazero":
         if env_vars["USE_REPLAY_BUFFER"]:
-            tag += f"/replay_{env_vars['REPLAY_BUFFER_SIZE']}/train_{env_vars['NUM_SGD_ITER']}x{env_vars['TRAIN_BATCH_SIZE']}"
+            replay_buffer_size = env_vars["REPLAY_BUFFER_SIZE"]
+            train_batch_size = env_vars["TRAIN_BATCH_SIZE"]
         else:
-            tag += f"/no_replay/train_{env_vars['NUM_SGD_ITER']}x1"
+            replay_buffer_size = 0
+            train_batch_size = 1
+        tag += f"/replay_{replay_buffer_size}/train_{env_vars['NUM_SGD_ITER']}x{train_batch_size}"
+        if env_vars["USE_MODEL_REPLAY_BUFFER"]:
+            model_replay_buffer_size = env_vars["MODEL_REPLAY_BUFFER_SIZE"]
+        else:
+            model_replay_buffer_size = 0
+        tag += f"/model_replay_{model_replay_buffer_size}"
 
     tag += f"/max_seq_len_{env_vars['MAX_SEQ_LEN']}/gamma_{env_vars['GAMMA']}/lr_{env_vars['LR']}/weight_decay_{env_vars.get('WEIGHT_DECAY', 0)}"
     vf_scale = env_vars.get("VF_SCALE", 1)
@@ -510,6 +522,10 @@ def make_train_tag(env_vars: dict, algorithm: Algorithm, agent: Agent) -> str:
             raise ValueError("env_vars['PRETRAIN'] must be False to make train tag.")
 
         tag += f"/pretrain_{pretrain}"
+
+        tag += (
+            f"/use_bilevel_action_selection_{env_vars['USE_BILEVEL_ACTION_SELECTION']}"
+        )
 
     return tag
 
@@ -1065,9 +1081,12 @@ def make_extra_slurm_args(env_vars: dict, algorithm: Algorithm) -> str:
     num_layers = env_vars["NUM_LAYERS"]
     hidden_size = env_vars["HIDDEN_SIZE"]
     interleave_lstm = env_vars["INTERLEAVE_LSTM"]
-    if (interleave_lstm and num_layers > 8) or (
-        not interleave_lstm and (num_layers > 6 or hidden_size > 64)
-    ):
+    use_separated_transformer = env_vars["USE_SEPARATED_TRANSFORMER"]
+    if (
+        use_separated_transformer
+        and (interleave_lstm and num_layers > 8)
+        or (not interleave_lstm and (num_layers > 6 or hidden_size > 64))
+    ) or (not use_separated_transformer and num_layers >= 6):
         extra_slurm_args.append(a100_nodelist)
     else:
         # Otherwise, exclude machines with small GPUs. --exclude seems to be
