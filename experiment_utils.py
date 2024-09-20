@@ -110,8 +110,8 @@ DEFAULT_HUMAN_ALPHAZERO_ENV_VARS = dict(
 
 # Default config for human MCTS.
 DEFAULT_HUMAN_MCTS_CONFIG = dict(
-    num_simulations=30,
-    puct_coefficient=1,
+    num_simulations=100,
+    puct_coefficient=10,
     prior_temperature=1,
     explore_noops=False,
 )
@@ -252,9 +252,22 @@ HUMAN_ALGORITHM_TO_ENV_VARS: Dict[Algorithm, str] = {
     "alphazero": DEFAULT_HUMAN_ALPHAZERO_ENV_VARS,
 }
 
+# Mapping from agent type (human or assistant) to the play mode, which is the
+# directory under the run where logs are stored.
+# NOTE: this used to be "self_play" and "cross_play", but is now "1_player" and
+# "2_player".
 AGENT_TO_PLAY_MODE: Dict[Agent, str] = {
-    "human": "self_play",
-    "assistant": "cross_play",
+    "human": "1_player",
+    "assistant": "2_player",
+}
+
+# Mapping from the name of the data split used in the spreadsheet to the name
+# used in the code and logs.
+SPREADSHEET_DATA_SPLIT_MAP = {
+    "none": None,
+    "alone": "human_alone",
+    "with_assistant": "human_with_assistant",
+    "both": "combined",
 }
 
 
@@ -321,9 +334,10 @@ def make_bc_common_tag(env_vars: dict, agent: Agent) -> str:
     return tag
 
 
-def make_alphazero_from_bc_tag(env_vars: dict) -> str:
-    tag = f"bc_to_az/teleportation_{env_vars['TELEPORTATION']}/inf_blocks_{env_vars['INF_BLOCKS']}/split_{env_vars['SPLIT']}/model_{env_vars['NUM_LAYERS']}x{env_vars['HIDDEN_SIZE']}/lr_{env_vars['LR']}"
-
+def make_alphazero_from_bc_tag_with_human_model_name(
+    env_vars: dict, human_model_name: str
+) -> str:
+    tag = f"bc_to_az/teleportation_{env_vars['TELEPORTATION']}/inf_blocks_{env_vars['INF_BLOCKS']}/{human_model_name}"
     num_simulations = env_vars.get("NUM_SIMULATIONS")
     if num_simulations is not None:
         tag += f"/sim_{num_simulations}"
@@ -332,7 +346,35 @@ def make_alphazero_from_bc_tag(env_vars: dict) -> str:
     if puct_coefficient is not None:
         tag += f"/{make_puct_coeff_tag(puct_coefficient, puct_coefficient_schedule)}"
 
-    tag += f"/seed_{env_vars['SEED']}"
+    validation_participant_ids = env_vars["VALIDATION_PARTICIPANT_IDS"]
+    if validation_participant_ids is not None:
+        tag += f"/validation_{validation_participant_ids}"
+
+    return tag
+
+
+def make_alphazero_from_bc_tag(env_vars: dict, human_model_name: Optional[str]) -> str:
+    if human_model_name is not None:
+        return make_alphazero_from_bc_tag_with_human_model_name(
+            env_vars, human_model_name
+        )
+
+    tag = f"bc_to_az/teleportation_{env_vars['TELEPORTATION']}/inf_blocks_{env_vars['INF_BLOCKS']}/split_{env_vars['SPLIT']}/model_{env_vars['NUM_LAYERS']}x{env_vars['HIDDEN_SIZE']}"
+
+    lr = env_vars.get("LR")
+    if lr is not None:
+        tag += f"/lr_{lr}"
+    num_simulations = env_vars.get("NUM_SIMULATIONS")
+    if num_simulations is not None:
+        tag += f"/sim_{num_simulations}"
+    puct_coefficient = env_vars.get("PUCT_COEFFICIENT")
+    puct_coefficient_schedule = env_vars.get("PUCT_COEFFICIENT_SCHEDULE")
+    if puct_coefficient is not None:
+        tag += f"/{make_puct_coeff_tag(puct_coefficient, puct_coefficient_schedule)}"
+
+    seed = env_vars.get("SEED")
+    if seed is not None:
+        tag += f"/seed_{seed}"
 
     if env_vars.get("CHECKPOINT"):
         # Use the checkpoint name if provided, otherwise just "ckpt".
@@ -1597,7 +1639,9 @@ def get_data_split_from_path(path: str, subset: Literal["train", "test"]) -> str
         raise ValueError(f"subset must be 'train' or 'test', got {subset}.")
     prefix = "split_" if subset == "train" else "test_split_"
     split_dirs = [d for d in pathlib.Path(path).parts if d.startswith(prefix)]
-    assert len(split_dirs) == 1
+    assert (
+        len(split_dirs) == 1
+    ), f"Expected one path part starting with '{prefix}', got {len(split_dirs)} for path {str(path)}"
     return split_dirs[0][len(prefix) :]
 
 
@@ -1811,17 +1855,29 @@ def get_goal_metrics_df(
             assert run_path.exists(), f"Run path {run_path} does not exist."
             run_path = run_path.as_posix()
 
-        # Get the data split.
-        if checkpoint_dir is not None:
+        # Get the train data split.
+        if "train_data_split" in goal_metrics:
+            train_data_split = goal_metrics["train_data_split"]
+        elif checkpoint_dir is not None:
             train_data_split = get_data_split_from_path(checkpoint_dir, "train")
         else:
             train_data_split = None
 
+        # Get the test data split.
+        if "test_data_split" in goal_metrics:
+            test_data_split = goal_metrics["test_data_split"]
+        elif checkpoint_dir is not None:
+            test_data_split = get_data_split_from_path(checkpoint_dir, "test")
+        else:
+            test_data_split = None
+
         row = {
+            "human_model_name": goal_metrics.get("human_model_name"),
             "run_path": run_path,
             "checkpoint_dir": checkpoint_dir,
             "goal_eval_path": goal_eval_path,
             "train_data_split": train_data_split,
+            "test_data_split": test_data_split,
         }
 
         # Infer MCTS parameters.
@@ -2106,6 +2162,74 @@ def get_human_modeling_eval_subdir_name_or_pattern(
     return f"evaluate_human_modeling_{experiment_tag}_participants_{participant_ids_str}_{timestamp}"
 
 
+def load_human_model_df() -> pd.DataFrame:
+    """Load spreadsheet with human models for comparing AlphaZero assistants."""
+    sheet_id = "1TNVQA9KEof014eav_ymHu6T7hEct5Z_Khc-rB9HaTOk"
+    gid = "378689004"
+    df = pd.read_csv(
+        f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&id={sheet_id}&gid={gid}"
+    )
+    return df.dropna(how="all", subset=["human_model_checkpoint"], inplace=False)
+
+
+def get_bc_to_alphazero_conversion_env_vars_for_human_model_name(
+    experiment_config: Dict, human_model_df: pd.DataFrame
+) -> Dict:
+    """Get environment variables for converting a BC model to an AlphaZero model.
+
+    This function is for converting a BC model corresponding to
+    `experiment_config["human_model_name"]`, which must be in `human_model_df`,
+    to an AlphaZero model. The main difference between this function and
+    `get_bc_to_alphazero_conversion_env_vars` is the experiment tag and that it
+    doesn't check for trained BC models in my data directory defined by
+    `experiment_config`.
+    """
+    experiment_config = copy.deepcopy(experiment_config)
+    # Get the row for the human model.
+    human_model_name = experiment_config.pop("human_model_name")
+    human_model_df = human_model_df[
+        human_model_df["human_model_name"] == human_model_name
+    ]
+    assert (
+        len(human_model_df) == 1
+    ), f"Expected 1 row for human_model_name {human_model_name}, got {len(human_model_df)}"
+    human_model_checkpoint = pathlib.Path(
+        human_model_df["human_model_checkpoint"].iloc[0]
+    )
+    assert (
+        human_model_checkpoint.exists()
+    ), f"Checkpoint {human_model_checkpoint} not found"
+
+    # TODO: delete this block if not needed.
+    # Train data split for the human model.
+    data_split_str = human_model_df["human_data_split"].iloc[0]
+    data_split = SPREADSHEET_DATA_SPLIT_MAP.get(data_split_str)
+    if data_split is None:
+        raise ValueError(f"Invalid data_split {data_split_str}")
+
+    # Load the human model training config.
+    config_path = human_model_checkpoint.parent / "config.json"
+    assert config_path.exists(), f"Config {config_path} not found"
+    with open(config_path, "r") as f:
+        config = json.load(f)
+
+    # Make the environment variables for the BC to AlphaZero experiment.
+    bc_to_alphazero_env_vars = {
+        key.upper(): config[key]
+        for key in ["teleportation", "inf_blocks", "num_layers", "hidden_size"]
+    }
+    bc_to_alphazero_env_vars.update(experiment_config)
+    bc_to_alphazero_env_vars["CHECKPOINT"] = str(human_model_checkpoint)
+    bc_to_alphazero_env_vars["SPLIT"] = data_split
+
+    # Experiment tag.
+    tag = make_alphazero_from_bc_tag(bc_to_alphazero_env_vars, human_model_name)
+
+    bc_to_alphazero_env_vars["TAG"] = tag
+
+    return bc_to_alphazero_env_vars
+
+
 def get_human_modeling_eval_dir_pattern(
     checkpoint_dir: pathlib.Path,
     experiment_tag: str,
@@ -2262,20 +2386,40 @@ def get_human_goal_eval_env_vars_and_metrics(
     run_path: pathlib.Path,
     repeat_eval_if_exists: bool,
     run: str,
-    algorithm_config_updates: Dict,
+    algorithm_config_updates: List[Dict],
     experiment_tag: Optional[str] = None,
     out_parent_dir: Optional[str] = None,
     timestamp: Optional[str] = None,
     num_episodes: int = 1000,
     debug: bool = False,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Get environment variables and metrics for goal evaluation.
+
+    Args:
+        checkpoint_dir: Directory of the checkpoint being evaluated.
+        run_path: Path to the run.json file for the checkpoint being evaluated.
+        repeat_eval_if_exists: Whether to repeat evaluation if it already exists.
+        run: Name of the run as defined in train.py (e.g., "MbagAlphaZero", "BC").
+        algorithm_config_updates: Updates to the algorithm configuration for each
+            player. In general, the first element is for the human and the second
+            is for the assistant. However, only human_alone evaluation is currently
+            supported, so this should be a one-element list with config updates
+            for the human.
+        experiment_tag: Tag for the experiment.
+        out_parent_dir: Parent directory for the output directory where
+            evaluation results are saved.
+        timestamp: Timestamp for the evaluation run. Used to check if an
+            evaluation run already exists and to determine where to save the
+            evaluation results.
+        num_episodes: Number of episodes to evaluate.
+        debug: Whether to print debug information.
+    """
     # Goal percentage evaluation.
     subset = "test"
     if experiment_tag is None:
         experiment_tag = subset
     env_config_updates = {
         "horizon": 1500,
-        "truncate_on_no_progress_timesteps": None,
         "goal_generator_config": {
             "goal_generator_config": {
                 "subset": subset,
@@ -2364,15 +2508,24 @@ def filter_completed_runs(run_paths_algos_and_val_participant_ids):
 
 def get_eval_dir(
     checkpoint_dir: Union[pathlib.Path, str],
-    test_data_split: Optional[str] = None,
-    algorithm_config_updates: Optional[Dict[str, Any]] = None,
+    test_data_split: str,
+    algorithm_config_updates: Optional[
+        Union[Dict[str, Any], List[Dict[str, Any]]]
+    ] = None,
 ):
     eval_dir = checkpoint_dir
     if algorithm_config_updates:
-        mcts_eval_tag = make_mcts_eval_tag(algorithm_config_updates)
+        if isinstance(algorithm_config_updates, list):
+            assert len(algorithm_config_updates) == 1
+            human_algorithm_config_updates = algorithm_config_updates[0]
+        else:
+            human_algorithm_config_updates = algorithm_config_updates
+
+        mcts_eval_tag = make_mcts_eval_tag(human_algorithm_config_updates)
         eval_dir = os.path.join(eval_dir, mcts_eval_tag)
-    if test_data_split is not None:
-        eval_dir = os.path.join(eval_dir, f"test_split_{test_data_split}")
+
+    assert test_data_split is not None
+    eval_dir = os.path.join(eval_dir, f"test_split_{test_data_split}")
 
     return eval_dir
 
@@ -2384,6 +2537,7 @@ def get_human_eval_env_vars_and_metrics_for_experiment(
     human_modeling_eval: bool = True,
     require_training_completed: bool = True,
     repeat_eval_if_exists: bool = False,
+    human_model_df: pd.DataFrame = None,
 ) -> Tuple[
     List[Dict[str, Any]],
     List[Dict[str, Any]],
@@ -2397,11 +2551,19 @@ def get_human_eval_env_vars_and_metrics_for_experiment(
     Args:
         experiment_config (Dict[str, Any]): The experiment configuration.
         agent (Agent): The agent to be evaluated.
+        goal_eval (bool, optional): Whether to perform goal evaluation. Defaults
+            to True.
+        human_modeling_eval (bool, optional): Whether to perform human modeling
+            evaluation (cross-entropy/accuracy of the human data). Defaults to
+            True.
         require_training_completed (bool, optional): Whether to require training
             to be completed before evaluation. Defaults to True.
         jobs (bool, optional): Whether to create evaluation jobs. Defaults to True.
         repeat_eval_if_exists (bool, optional): Whether to repeat evaluation if it
             already exists. Defaults to False.
+        human_model_df (pd.DataFrame, optional): DataFrame containing human models
+            and checkpoints. Must be provided if `experiment_config` contains
+            "human_model_name". Defaults to None.
 
     Returns:
         Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any], List[Dict, str, Any]]]: A tuple containing the environment variables for human modeling evaluation, human modeling metrics, environment variables for human goal evaluation, and goal evaluation metrics.
@@ -2436,31 +2598,47 @@ def get_human_eval_env_vars_and_metrics_for_experiment(
         config.update(experiment_config)
         experiment_config = config
 
-        # Set the algorithm to BC to get the environment variables for the BC model that
-        # piKL uses.
-        experiment_config["algorithm"] = "bc"
-
-        # Use force_train=True to get the environment variables since the training
-        # run may exist (should exist to be able to run eval).
-        bc_env_vars, _ = get_env_vars_for_experiment(
-            experiment_config,
-            agent,
-            experiments_df=None,
-            use_most_recent_pretrain_checkpoint=True,
-            use_incomplete_pretrain_checkpoint=True,
-            force_pretrain=False,
-            force_train=True,
-        )
-        assert bc_env_vars is not None
-        train_data_split = bc_env_vars["SPLIT"]
-        test_data_split = bc_env_vars["TEST_SPLIT"]
-
-        # Set the algorithm to AlphaZero because that the BC checkpoints were converted to AlphaZero checkpoints to run piKL.
+        # Set the algorithm to AlphaZero because that the BC checkpoints were
+        # converted to AlphaZero checkpoints to run piKL.
         algorithm = "alphazero"
-
-        # Train tag for the piKL (AlphaZero) checkpoint created from the BC checkpoint.
-        train_tag = make_alphazero_from_bc_tag(bc_env_vars)
+        # The converted checkpoints don't have a Slurm job ID in the path.
         includes_slurm_job_id = False
+
+        # Get the experiment train tag.
+        # If the human model name is specified, use a different method of getting
+        # the train tag. This is for human models in the spreadsheet, which may
+        # have arbitrary checkpoints.
+        if "human_model_name" in experiment_config:
+            bc_to_alphazero_env_vars = (
+                get_bc_to_alphazero_conversion_env_vars_for_human_model_name(
+                    experiment_config, human_model_df
+                )
+            )
+            train_data_split = bc_to_alphazero_env_vars["SPLIT"]
+            test_data_split = bc_to_alphazero_env_vars["TEST_SPLIT"]
+            train_tag = bc_to_alphazero_env_vars["TAG"]
+        else:
+            # Set the algorithm to BC to get the environment variables for the BC model that
+            # piKL uses.
+            experiment_config["algorithm"] = "bc"
+
+            # Use force_train=True to get the environment variables since the training
+            # run may exist (should exist to be able to run eval).
+            bc_env_vars, _ = get_env_vars_for_experiment(
+                experiment_config,
+                agent,
+                experiments_df=None,
+                use_most_recent_pretrain_checkpoint=True,
+                use_incomplete_pretrain_checkpoint=True,
+                force_pretrain=False,
+                force_train=True,
+            )
+            assert bc_env_vars is not None
+            train_data_split = bc_env_vars["SPLIT"]
+            test_data_split = bc_env_vars["TEST_SPLIT"]
+
+            # Train tag for the piKL (AlphaZero) checkpoint created from the BC checkpoint.
+            train_tag = make_alphazero_from_bc_tag(bc_env_vars)
     else:
         raise NotImplementedError(f"Unsupported algorithm: {algorithm}")
 
@@ -2477,6 +2655,9 @@ def get_human_eval_env_vars_and_metrics_for_experiment(
             )
         )
     if goal_eval:
+        assert (
+            test_data_split == "human_alone"
+        ), f"Goal eval only currently supported for human alone, got {test_data_split}."
         run_paths_algos_and_val_participant_ids.extend(
             get_validation_experiments(
                 train_tag,
@@ -2513,6 +2694,9 @@ def get_human_eval_env_vars_and_metrics_for_experiment(
         algorithm,
         val_participant_id,
     ) in run_paths_algos_and_val_participant_ids:
+        curr_goal_eval = val_participant_id is None
+        curr_human_modeling_eval = not curr_goal_eval
+
         with open(run_path.parent / "config.json", "r") as f:
             config = json.load(f)
         inf_blocks = str(config["inf_blocks"]).lower()
@@ -2528,14 +2712,16 @@ def get_human_eval_env_vars_and_metrics_for_experiment(
             puct_coefficient_schedule = experiment_config.get(
                 "puct_coefficient_schedule"
             )
+            assert (
+                puct_coefficient_schedule is None
+            ), "puct_coefficient_schedule is not implemented."
             prior_temp = experiment_config["prior_temperature"]
             explore_noops = experiment_config["explore_noops"]
-            algorithm_config_updates = {
+            human_algorithm_config_updates = {
                 "mcts_config": {
                     "num_simulations": num_simulations,
                     "temperature": 1,
                     "puct_coefficient": puct_coeff,
-                    "puct_coefficient_schedule": puct_coefficient_schedule,
                     "add_dirichlet_noise": False,
                     "temperature_schedule": None,
                     "argmax_tree_policy": False,
@@ -2550,25 +2736,36 @@ def get_human_eval_env_vars_and_metrics_for_experiment(
                 "use_critic": False,
                 "explore": True,
             }
+            if puct_coefficient_schedule is not None:
+                human_algorithm_config_updates["mcts_config"][
+                    "puct_coefficient_schedule"
+                ] = puct_coefficient_schedule
         else:
-            algorithm_config_updates = {}
+            human_algorithm_config_updates = {}
 
-        # Only add the test data split for the human modeling evaluation because
-        # it uses the human data split to compute the cross entropy. The goal
-        # percentage evaluation simply performs policy rollouts and does not use
-        # the human data, so the data split should not be added.
-        goal_eval_out_parent_dir = get_eval_dir(
-            checkpoint_dir,
-            test_data_split=None,
-            algorithm_config_updates=algorithm_config_updates,
-        )
-        modeling_eval_out_parent_dir = get_eval_dir(
+        # For goal eval, the algorithm config updates are a list because they are
+        # per player. Since only human_alone goal eval is currently supported,
+        # we make it a one-lement list. For human modeling eval, the updates are
+        # for the human model alone, so a list is not required.
+        if curr_goal_eval:
+            algorithm_config_updates = [human_algorithm_config_updates]
+        else:
+            algorithm_config_updates = human_algorithm_config_updates
+
+        # Use the test data split for both goal evaluation and human modeling
+        # evaluation. For goal eval, the options are "human_alone" and
+        # "human_with_assistant", which evaluate the human model alone and with
+        # the assistant, respectively. For human modeling eval, we use the
+        # provided human data split to compute the cross entropy, so "combined"
+        # is also an option.
+        eval_out_parent_dir = get_eval_dir(
             checkpoint_dir,
             test_data_split=test_data_split,
             algorithm_config_updates=algorithm_config_updates,
         )
 
-        if val_participant_id is None:
+        if curr_goal_eval:
+            assert not curr_human_modeling_eval
             # Goal percentage evaluation. Only performed when trained on the
             # full dataset without leave-one-out validation.
             # Add a subdirectory with a timestamp to the output directory because the goal eval does not do this automatically.
@@ -2578,15 +2775,23 @@ def get_human_eval_env_vars_and_metrics_for_experiment(
                 repeat_eval_if_exists,
                 run,
                 algorithm_config_updates,
-                out_parent_dir=goal_eval_out_parent_dir,
+                out_parent_dir=eval_out_parent_dir,
                 timestamp=timestamp,
                 num_episodes=100,
             )
             if goal_env_vars is not None:
                 human_goal_env_vars_list.append(goal_env_vars)
             if goal_metrics is not None:
+                goal_metrics.update(
+                    {
+                        "train_data_split": train_data_split,
+                        "test_data_split": test_data_split,
+                        "human_model_name": experiment_config.get("human_model_name"),
+                    }
+                )
                 human_goal_metrics_list.append(goal_metrics)
         else:
+            assert curr_human_modeling_eval and not curr_goal_eval
             # Human modeling evaluation. Requires leave-one-out validation.
             assert (
                 train_data_split in ALL_DATA_SPLITS
@@ -2607,13 +2812,20 @@ def get_human_eval_env_vars_and_metrics_for_experiment(
                     inf_blocks,
                     run,
                     algorithm_config_updates,
-                    out_parent_dir=modeling_eval_out_parent_dir,
+                    out_parent_dir=eval_out_parent_dir,
                     timestamp=timestamp,
                 )
             )
             if human_model_env_vars is not None:
                 human_modeling_env_vars_list.append(human_model_env_vars)
             if human_model_metrics is not None:
+                human_model_metrics.update(
+                    {
+                        "train_data_split": train_data_split,
+                        "test_data_split": test_data_split,
+                        "human_model_name": experiment_config.get("human_model_name"),
+                    }
+                )
                 human_modeling_metrics_list.append(human_model_metrics)
 
     return (
@@ -2638,7 +2850,7 @@ def get_bc_to_alphazero_conversion_env_vars(
     experiment_config: Dict[str, Any], agent: Agent
 ):
     # Use force_train=True to get the environment variables since the training
-    # run may exist (should exist to be able to run eval).
+    # run exists (should exist to be able to run eval).
     bc_env_vars, algorithm = get_env_vars_for_experiment(
         experiment_config,
         agent,
@@ -2772,17 +2984,22 @@ def make_human_modeling_metrics_df(
             modeling_eval_path = hm_metrics["eval_run_path"]
 
             # Data split that the model was evaluated on for human modeling.
-            test_data_split = get_data_split_from_path(modeling_eval_path, "test")
+            test_data_split = hm_metrics.get(
+                "test_data_split"
+            ) or get_data_split_from_path(modeling_eval_path, "test")
 
             # Get the data split.
-            train_data_split = get_data_split_from_path(checkpoint_dir, "train")
+            train_data_split = hm_metrics.get(
+                "train_data_split"
+            ) or get_data_split_from_path(checkpoint_dir, "train")
 
             row = {
+                "human_model_name": hm_metrics.get("human_model_name"),
+                "train_data_split": train_data_split,
+                "test_data_split": test_data_split,
                 "run_path": run_path,
                 "checkpoint_dir": str(checkpoint_dir),
                 "modeling_eval_path": modeling_eval_path,
-                "train_data_split": train_data_split,
-                "test_data_split": test_data_split,
             }
 
             if algorithm in ["pikl", "alphazero"]:
