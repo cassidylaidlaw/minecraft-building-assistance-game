@@ -12,6 +12,7 @@ from mbag.agents.action_distributions import MbagActionDistribution
 from mbag.environment.actions import MbagAction, MbagActionTuple
 from mbag.environment.blocks import MinecraftBlocks
 from mbag.environment.schedule import PiecewiseSchedule, Schedule
+from mbag.environment.types import MbagObs
 
 from ..rllib_env import unwrap_mbag_env
 from ..torch_models import MbagTorchModel, OtherAgentActionPredictorMixin
@@ -68,6 +69,7 @@ class MbagMCTSNode:
         model_state_in: Sequence[Union[np.ndarray, torch.Tensor]],
         parent: Union["MbagMCTSNode", MbagRootParentNode],
         c_puct: float = np.nan,
+        obs_for_computing_valid_actions: Optional[MbagObs] = None,
     ):
         self.env = parent.env
         self.action = action  # Action used to go to this state
@@ -109,7 +111,12 @@ class MbagMCTSNode:
             [self.action_space_size], dtype=np.int64
         )  # N
 
-        self.valid_actions = self.env.get_valid_actions(self.obs)
+        if obs_for_computing_valid_actions is not None:
+            self.valid_actions = self.env.get_valid_actions(
+                obs_for_computing_valid_actions
+            )
+        else:
+            self.valid_actions = self.env.get_valid_actions(self.obs)
         self.valid_action_types = np.array(
             [
                 np.any(self.valid_actions[self.action_type_slices[action_type]])
@@ -503,7 +510,9 @@ class MbagMCTSNode:
         (expected_reward, expected_own_reward).
         """
 
-        if not self.mcts.use_goal_predictor and self.other_agent_action_dist is None:
+        if self.mcts.act_greedily_on_own_reward or (
+            not self.mcts.use_goal_predictor and self.other_agent_action_dist is None
+        ):
             child = self.get_child(action)
             assert child.info is not None
             return child.reward, child.info["own_reward"]
@@ -648,6 +657,10 @@ class MbagMCTS(MCTS):
                 "predict_goal_using_next_state and predict_goal_using_average "
                 "cannot both be True"
             )
+        self.expected_own_reward_scale: float = mcts_param.get(
+            "expected_own_reward_scale", 1
+        )
+        self.expected_reward_shift: float = mcts_param.get("expected_reward_shift", 0)
 
         # Previously, we used a version of bilevel action selection that wasn't
         # quite accurate. It used the number of visits to the whole state rather than
@@ -665,6 +678,12 @@ class MbagMCTS(MCTS):
         self.store_model_state_in_torch: bool = mcts_param.get(
             "store_model_state_in_torch", True
         )
+
+        self.act_greedily_on_own_reward: bool = mcts_param.get(
+            "act_greedily_on_own_reward", False
+        )
+        if self.act_greedily_on_own_reward:
+            self.num_sims = 1
 
     @property
     def persist_c_puct(self):
@@ -689,6 +708,7 @@ class MbagMCTS(MCTS):
     def compute_actions(  # noqa: C901
         self, nodes: List[MbagMCTSNode]
     ) -> Tuple[np.ndarray, np.ndarray]:
+
         for _ in range(self.num_sims):
             leaves: List[MbagMCTSNode] = [node.select() for node in nodes]
             obs = [leaf.obs for leaf in leaves]
@@ -787,7 +807,21 @@ class MbagMCTS(MCTS):
         tree_policies = np.power(tree_policies, self.temperature)
         tree_policies = tree_policies / np.sum(tree_policies, axis=1, keepdims=True)
 
-        if self.exploit:
+        if self.act_greedily_on_own_reward:
+            actions_list: List[int] = []
+            for node in nodes:
+                node.other_agent_action_dist = None
+                actions_expected_rewards = []
+                for action in np.nonzero(node.valid_actions)[0]:
+                    child = node.get_child(action)
+                    actions_expected_rewards.append(
+                        (action, child.reward),
+                    )
+                np.random.shuffle(actions_expected_rewards)
+                action, _ = max(actions_expected_rewards, key=lambda x: x[1])
+                actions_list.append(action)
+            actions = np.array(actions_list)
+        elif self.exploit:
             # if exploit then choose action that has the maximum
             # tree policy probability
             actions = np.argmax(tree_policies, axis=1)

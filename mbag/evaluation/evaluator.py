@@ -1,7 +1,7 @@
 import copy
 import logging
 import traceback
-from typing import Any, List, Optional, Tuple, Type
+from typing import List, Optional, Tuple, Type
 
 from mbag.agents.mbag_agent import MbagAgent
 from mbag.environment.actions import MbagActionTuple
@@ -12,7 +12,7 @@ from .episode import MbagEpisode
 
 logger = logging.getLogger(__name__)
 
-MbagAgentConfig = Tuple[Type[MbagAgent], Any]
+MbagAgentConfig = Tuple[Type[MbagAgent], dict]
 """
 An MbagAgent subclass together with the agent config for that agent.
 """

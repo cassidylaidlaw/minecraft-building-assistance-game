@@ -1,3 +1,4 @@
+import copy
 import logging
 import time
 from typing import Iterable, List, Optional, cast
@@ -12,8 +13,14 @@ from mbag.agents.action_distributions import MbagActionDistribution
 from mbag.agents.mbag_agent import MbagAgent
 from mbag.environment.actions import MbagAction, MbagActionTuple
 from mbag.environment.mbag_env import MbagConfigDict
-from mbag.environment.state import MbagStateDict
-from mbag.environment.types import MbagInfoDict, MbagObs
+from mbag.environment.state import MbagStateDict, mbag_obs_to_state
+from mbag.environment.types import (
+    CURRENT_BLOCKS,
+    CURRENT_PLAYER,
+    LAST_INTERACTED,
+    MbagInfoDict,
+    MbagObs,
+)
 from mbag.rllib.alpha_zero.alpha_zero_policy import C_PUCT, MbagAlphaZeroPolicy
 
 logger = logging.getLogger(__name__)
@@ -31,12 +38,22 @@ class RllibMbagAgentConfigDict(TypedDict):
     return a NOOP.
     """
 
+    ignore_own_actions: bool
+    """
+    If this is True, the agent will receive observations that do not have any direct
+    effects of its own place/break actions.
+    """
+
 
 class RllibMbagAgent(MbagAgent):
     agent_config: RllibMbagAgentConfigDict
     state: List[TensorType]
     last_action_time: Optional[float]
     prev_action: MbagActionTuple
+
+    # Used when ignore_own_actions is True.
+    current_blocks: Optional[np.ndarray]
+    last_interacted: Optional[np.ndarray]
 
     def __init__(self, agent_config: MbagConfigDict, env_config: MbagConfigDict):
         super().__init__(agent_config, env_config)
@@ -47,6 +64,7 @@ class RllibMbagAgent(MbagAgent):
         self.confidence_threshold = cast(
             Optional[float], self.agent_config.get("confidence_threshold", None)
         )
+        self.ignore_own_actions = self.agent_config.get("ignore_own_actions", False)
         self.action_mapping = MbagActionDistribution.get_action_mapping(self.env_config)
 
     def reset(self, **kwargs) -> None:
@@ -57,7 +75,13 @@ class RllibMbagAgent(MbagAgent):
         self.last_action_time = None
         self.prev_action = (0, 0, 0)
 
+        if self.ignore_own_actions:
+            self.current_blocks = None
+            self.last_interacted = None
+
     def get_action(self, obs: MbagObs, *, compute_actions_kwargs={}) -> MbagActionTuple:
+        obs = copy.deepcopy(obs)
+
         force_noop = False
         if self.last_action_time is not None:
             time_since_last_action = time.time() - self.last_action_time
@@ -72,6 +96,28 @@ class RllibMbagAgent(MbagAgent):
                 **compute_actions_kwargs,
                 "prev_c_puct": np.array([self.c_puct]),
             }
+
+        if self.ignore_own_actions:
+            compute_actions_kwargs["env_states"] = [
+                mbag_obs_to_state(obs, self.policy.config["player_index"])
+            ]
+
+            world_obs = obs[0]
+            if self.current_blocks is None:
+                self.current_blocks = world_obs[CURRENT_BLOCKS]
+            if self.last_interacted is None:
+                self.last_interacted = world_obs[LAST_INTERACTED]
+
+            last_interacted = world_obs[LAST_INTERACTED]
+            self.current_blocks[last_interacted > CURRENT_PLAYER] = world_obs[
+                CURRENT_BLOCKS
+            ][last_interacted > CURRENT_PLAYER]
+            self.last_interacted[last_interacted > CURRENT_PLAYER] = world_obs[
+                LAST_INTERACTED
+            ][last_interacted > CURRENT_PLAYER]
+            world_obs[CURRENT_BLOCKS] = self.current_blocks
+            world_obs[LAST_INTERACTED] = self.last_interacted
+            assert not np.any(obs[0][LAST_INTERACTED] == CURRENT_PLAYER)
 
         obs_batch = tuple(obs_piece[None] for obs_piece in obs)
         # preprocessor = ModelCatalog.get_preprocessor_for_space(self.policy.observation_space)
@@ -131,11 +177,18 @@ class RllibMbagAgent(MbagAgent):
         return action
 
     def get_state(self) -> List[np.ndarray]:
-        return [np.array(state_part) for state_part in self.state] + [
+        state = [np.array(state_part) for state_part in self.state] + [
             np.array(self.prev_action)
         ]
+        if self.agent_config["ignore_own_actions"]:
+            assert self.current_blocks is not None and self.last_interacted is not None
+            state += [self.current_blocks, self.last_interacted]
+        return state
 
     def set_state(self, state: List[np.ndarray]) -> None:
+        if self.agent_config["ignore_own_actions"]:
+            self.current_blocks, self.last_interacted = state[-2:]
+            state = state[:-2]
         self.state = [state_part for state_part in state[:-1]]
         self.prev_action = tuple(state[-1])
 

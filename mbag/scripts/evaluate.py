@@ -63,6 +63,7 @@ def sacred_config():
 
     env_config_updates = {}  # noqa: F841
     algorithm_config_updates: List[dict] = [{}]  # noqa: F841
+    agent_config_updates: List[dict] = [{}]  # noqa: F841
 
     # Used by named configs
     assistant_checkpoint = None  # noqa: F841
@@ -117,12 +118,20 @@ def human_with_assistant():
         },
     ]
     env_config_updates = {  # noqa: F841
+        "num_players": 2,
         "goal_generator_config": {
             "goal_generator_config": {"subset": goal_set, "house_id": house_id}
         },
         "malmo": {"action_delay": 0.8, "rotate_spectator": False},
         "horizon": 10000,
-        "players": [{"player_name": "human"}, {"player_name": "assistant"}],
+        "players": [
+            {
+                "player_name": "human",
+            },
+            {
+                "player_name": "assistant",
+            },
+        ],
     }
     min_action_interval = 0.8  # noqa: F841
     use_malmo = True  # noqa: F841
@@ -138,6 +147,7 @@ def run_evaluation(
     confidence_thresholds: Optional[List[Optional[float]]],
     env_config_updates: MbagConfigDict,
     algorithm_config_updates: List[dict],
+    agent_config_updates: List[dict],
     seed: int,
     record_video: bool,
     use_malmo: bool,
@@ -220,6 +230,11 @@ def run_evaluation(
                 )
             )
 
+    for (agent_cls, agent_config), agent_config_update in zip(
+        agent_configs, agent_config_updates
+    ):
+        agent_config.update(agent_config_update)
+
     env_config.setdefault("malmo", {})
     env_config["malmo"]["use_malmo"] = use_malmo
     if record_video:
@@ -249,6 +264,7 @@ def evaluation_worker(
     confidence_thresholds: Optional[List[Optional[float]]],
     env_config_updates: MbagConfigDict,
     algorithm_config_updates: List[dict],
+    agent_config_updates: List[dict],
     seed: int,
     record_video: bool,
     use_malmo: bool,
@@ -266,6 +282,7 @@ def evaluation_worker(
                 confidence_thresholds=confidence_thresholds,
                 env_config_updates=env_config_updates,
                 algorithm_config_updates=algorithm_config_updates,
+                agent_config_updates=agent_config_updates,
                 seed=seed + worker_index,
                 record_video=record_video,
                 use_malmo=use_malmo,
@@ -299,6 +316,7 @@ def main(  # noqa: C901
     experiment_tag: str,
     env_config_updates: MbagConfigDict,
     algorithm_config_updates: List[dict],
+    agent_config_updates: List[dict],
     seed: int,
     record_video: bool,
     use_malmo: bool,
@@ -339,6 +357,7 @@ def main(  # noqa: C901
             confidence_thresholds=confidence_thresholds,
             env_config_updates=env_config_updates,
             algorithm_config_updates=algorithm_config_updates,
+            agent_config_updates=agent_config_updates,
             seed=seed,
             record_video=record_video,
             use_malmo=use_malmo,
@@ -366,6 +385,7 @@ def main(  # noqa: C901
                     "confidence_thresholds": confidence_thresholds,
                     "env_config_updates": env_config_updates,
                     "algorithm_config_updates": algorithm_config_updates,
+                    "agent_config_updates": agent_config_updates,
                     "seed": seed,
                     "record_video": record_video,
                     "use_malmo": use_malmo,
@@ -376,7 +396,7 @@ def main(  # noqa: C901
             process.start()
             processes.append(process)
             queues.append(queue)
-            time.sleep(10)
+            time.sleep(1)
         episode_generator = queue_episode_generator(queues)
 
     episodes: List[MbagEpisode] = []

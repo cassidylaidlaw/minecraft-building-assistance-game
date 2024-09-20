@@ -51,6 +51,8 @@ class MbagEnvModel(gym.Env):
         config: MbagConfigDict,
         player_index: int = 0,
         line_of_sight_masking=False,
+        expected_own_reward_scale=1.0,
+        expected_reward_shift=0.0,
     ):
         super().__init__()
 
@@ -58,6 +60,8 @@ class MbagEnvModel(gym.Env):
         self.config = config
         self.set_player_index(player_index)
         self.line_of_sight_masking = line_of_sight_masking
+        self.expected_own_reward_scale = expected_own_reward_scale
+        self.expected_reward_shift = expected_reward_shift
 
         assert isinstance(self.env.action_space, spaces.Dict)
         action_space = self.env.action_space.spaces[self.agent_id]
@@ -117,6 +121,14 @@ class MbagEnvModel(gym.Env):
             info["own_reward"] = (
                 info["goal_dependent_reward"] + info["goal_independent_reward"]
             )
+            if (
+                info["action"].action_type == MbagAction.PLACE_BLOCK
+                or info["action"].action_type == MbagAction.BREAK_BLOCK
+            ):
+                info["own_reward"] = (
+                    self.expected_reward_shift
+                    + self.expected_own_reward_scale * info["own_reward"]
+                )
             reward = info["own_reward"]
             reward = (
                 info["own_reward_prop"] * info["own_reward"]
@@ -220,11 +232,20 @@ class MbagEnvModel(gym.Env):
 
         if update_own_reward or average_own_reward:
             prev_own_reward = info["own_reward"]
-            new_own_reward = self._get_predicted_goal_dependent_reward(
+            new_goal_dependent_reward = self._get_predicted_goal_dependent_reward(
                 obs,
                 info["action"],
                 goal_logits,
             )
+            new_own_reward = info["goal_independent_reward"] + new_goal_dependent_reward
+            if (
+                info["action"].action_type == MbagAction.PLACE_BLOCK
+                or info["action"].action_type == MbagAction.BREAK_BLOCK
+            ):
+                new_own_reward = (
+                    self.expected_reward_shift
+                    + self.expected_own_reward_scale * new_own_reward
+                )
             assert not (update_own_reward and average_own_reward)
             if update_own_reward:
                 info["own_reward"] = new_own_reward

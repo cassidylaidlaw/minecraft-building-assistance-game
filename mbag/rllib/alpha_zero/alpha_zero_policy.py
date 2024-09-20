@@ -28,6 +28,7 @@ from torch import nn
 
 from mbag.environment.blocks import MinecraftBlocks
 from mbag.environment.config import MbagConfigDict
+from mbag.environment.state import MbagStateDict
 from mbag.environment.types import CURRENT_BLOCKS, GOAL_BLOCKS, MbagInfoDict, WorldSize
 
 from ..kl_regularization import ANCHOR_POLICY_ACTION_DIST_INPUTS
@@ -41,6 +42,7 @@ from ..torch_models import (
 from .mcts import MbagMCTS, MbagMCTSNode, MbagRootParentNode
 from .planning import MbagEnvModel
 
+ENV_STATES = "env_states"
 MCTS_POLICIES = "mcts_policies"
 OTHER_AGENT_ACTION_DIST_INPUTS = "other_agent_action_dist_inputs"
 OWN_REWARDS = "own_rewards"
@@ -113,7 +115,11 @@ class MbagAlphaZeroPolicy(
                 env_config["terminate_on_goal_completion"] = False
             env = env_creator(env_config)
             env_model = MbagEnvModel(
-                env, env_config, line_of_sight_masking=line_of_sight_masking
+                env,
+                env_config,
+                line_of_sight_masking=line_of_sight_masking,
+                expected_own_reward_scale=config.get("expected_own_reward_scale", 1.0),
+                expected_reward_shift=config.get("expected_reward_shift", 0.0),
             )
             unwrap_mbag_env(env_model).update_global_timestep(
                 self.global_timestep_for_envs
@@ -207,9 +213,10 @@ class MbagAlphaZeroPolicy(
         *,
         force_noop=False,
         prev_c_puct: Optional[np.ndarray] = None,
+        env_states: Optional[List[MbagStateDict]] = None,
         **kwargs,
     ):
-        input_dict = {"obs": obs_batch}
+        input_dict: Dict[str, Any] = {"obs": obs_batch}
         if prev_action_batch is not None:
             input_dict["prev_actions"] = prev_action_batch
         if prev_reward_batch is not None:
@@ -218,6 +225,8 @@ class MbagAlphaZeroPolicy(
             input_dict[f"state_in_{state_index}"] = state_batch
         if prev_c_puct is not None:
             input_dict[PREV_C_PUCT] = prev_c_puct
+        if env_states is not None:
+            input_dict[ENV_STATES] = env_states
 
         return self.compute_actions_from_input_dict(
             input_dict=input_dict,
@@ -275,7 +284,11 @@ class MbagAlphaZeroPolicy(
         nodes: List[MbagMCTSNode] = []
         for env_index in range(num_envs):
             env_obs = tuple(obs_piece[env_index] for obs_piece in obs)
-            env_state, env_obs = self.envs[env_index].set_state_from_obs(env_obs)
+            if ENV_STATES in input_dict:
+                env_state = input_dict[ENV_STATES][env_index]
+                env_obs = self.envs[env_index].set_state(env_state)
+            else:
+                env_state, env_obs = self.envs[env_index].set_state_from_obs(env_obs)
             model_state = [
                 input_dict[f"state_in_{state_index}"][env_index]
                 for state_index in range(model_state_len)
@@ -283,7 +296,8 @@ class MbagAlphaZeroPolicy(
             nodes.append(
                 MbagMCTSNode(
                     state=env_state,
-                    obs=env_obs,
+                    obs=tuple(obs_piece[env_index] for obs_piece in obs),
+                    obs_for_computing_valid_actions=env_obs,
                     reward=0,
                     done=False,
                     info=None,

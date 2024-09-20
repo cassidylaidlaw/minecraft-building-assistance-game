@@ -960,16 +960,24 @@ class MalmoInterface:
 
     def update_goal_percentage(self, goal_percentage: float):
         with self._malmo_lock:
-            percent = int(round(goal_percentage * 100))
+            percent = int(goal_percentage * 100)
             title_json = {
                 "text": f"Goal completion: {percent}%",
                 "fadeIn": "0s",
                 "stay": "2s",
                 "fadeOut": "0s",
             }
-            self._malmo_client.send_command(
-                0, f"chat /title @a actionbar {json.dumps(title_json)}"
-            )
+            for agent_index in range(
+                self._malmo_client._get_num_agents(self._env_config)
+            ):
+                if (
+                    agent_index < self._env_config["num_players"]
+                    and not self._env_config["players"][agent_index]["goal_visible"]
+                ):
+                    continue
+                self._malmo_client.send_command(
+                    agent_index, f"chat /title @p actionbar {json.dumps(title_json)}"
+                )
 
     def _run_spectator(self):
         """

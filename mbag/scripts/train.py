@@ -293,6 +293,7 @@ def sacred_config(_log):  # noqa
     num_gpus = 1.0 if torch.cuda.is_available() else 0.0
     num_gpus_per_worker = 0.0
     ray_init_options = {}  # noqa: F841
+    sample_freq = 1
     sample_batch_size = 5000
     train_batch_size = 5000
     sgd_minibatch_size = 512
@@ -364,6 +365,8 @@ def sacred_config(_log):  # noqa
     place_block_loss_coeff_schedule = None
     predict_goal_using_next_state = False
     predict_goal_using_average = False
+    expected_own_reward_scale = 1.0
+    expected_reward_shift = 0.0
     store_model_state_in_torch = False
 
     # Model
@@ -768,12 +771,15 @@ def sacred_config(_log):  # noqa
                 (0, entropy_coeff_start),
                 (entropy_coeff_horizon, entropy_coeff_end),
             ],
+            sample_freq=sample_freq,
             sample_batch_size=sample_batch_size,
             ranked_rewards={"enable": False},
             num_steps_sampled_before_learning_starts=0,
             mcts_config=convert_dogmatics_to_standard(mcts_config),
             use_critic=use_critic,
             use_goal_predictor=use_goal_predictor,
+            expected_own_reward_scale=expected_own_reward_scale,
+            expected_reward_shift=expected_reward_shift,
             other_agent_action_predictor_loss_coeff=other_agent_action_predictor_loss_coeff,
             use_replay_buffer=use_replay_buffer,
             replay_buffer_config={
