@@ -2375,8 +2375,10 @@ def load_episode_metrics(path):
         metrics = json.load(f)
 
     dfs = []
-    for episode_metrics in metrics["episode_metrics"]:
-        dfs.append(summarize_episode_metrics(episode_metrics))
+    for i, episode_metrics in enumerate(metrics["episode_metrics"]):
+        df = summarize_episode_metrics(episode_metrics)
+        df["episode"] = i
+        dfs.append(df)
 
     return pd.concat(dfs, ignore_index=True)
 
