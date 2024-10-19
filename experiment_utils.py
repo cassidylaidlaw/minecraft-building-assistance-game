@@ -1671,85 +1671,103 @@ def summarize_episode_metrics(episode_metrics: Dict[str, Any]) -> pd.DataFrame:
                 time = int(match.group(2))
             else:
                 time = float("nan")
-            summary_metrics.append((key, value, time))
+            summary_metrics.append((key, value, float("nan"), time))
 
     # Top-level (non-nested) player metrics
-    player_metrics = episode_metrics.get("player_metrics")
-    assert (
-        player_metrics is not None
-        and isinstance(player_metrics, list)
-        and len(player_metrics) == 1
-    )
-    player_metrics = player_metrics[0]
-    for key, value in player_metrics.items():
-        if key != "per_minute_metrics":
-            summary_metrics.append((key, value, float("nan")))
+    player_metrics_list = episode_metrics.get("player_metrics")
+    assert player_metrics_list is not None and isinstance(player_metrics_list, list)
+    for player_idx, player_metrics in enumerate(player_metrics_list):
+        for key, value in player_metrics.items():
+            if key != "per_minute_metrics":
+                summary_metrics.append((key, value, player_idx, float("nan")))
 
-    # Per-minute player metrics
-    per_minute_player_metrics = player_metrics.get("per_minute_metrics", {})
-    for key, value in per_minute_player_metrics.items():
-        match = re.search(per_minute_pattern, key)
-        assert match, f"Key {key} does not match the per-minute pattern."
-        key = match.group(1)
-        time = int(match.group(2))
-        summary_metrics.append((key, value, time))
-        times.add(time)
+        # Per-minute player metrics
+        per_minute_player_metrics = player_metrics.get("per_minute_metrics", {})
+        for key, value in per_minute_player_metrics.items():
+            match = re.search(per_minute_pattern, key)
+            assert match, f"Key {key} does not match the per-minute pattern."
+            key = match.group(1)
+            time = int(match.group(2))
+            summary_metrics.append((key, value, player_idx, time))
+            times.add(time)
 
-    move_metric_keys = [
-        "num_move_pos_x",
-        "num_move_neg_x",
-        "num_move_pos_y",
-        "num_move_neg_y",
-        "num_move_pos_z",
-        "num_move_neg_z",
-    ]
-    action_or_noop_metric_keys = [
-        "num_move_pos_x",
-        "num_move_neg_x",
-        "num_move_pos_y",
-        "num_move_neg_y",
-        "num_move_pos_z",
-        "num_move_neg_z",
-        "num_place_block",
-        "num_break_block",
-        "num_noop",
-    ]
+        move_metric_keys = [
+            "num_move_pos_x",
+            "num_move_neg_x",
+            "num_move_pos_y",
+            "num_move_neg_y",
+            "num_move_pos_z",
+            "num_move_neg_z",
+        ]
+        action_or_noop_metric_keys = [
+            "num_move_pos_x",
+            "num_move_neg_x",
+            "num_move_pos_y",
+            "num_move_neg_y",
+            "num_move_pos_z",
+            "num_move_neg_z",
+            "num_place_block",
+            "num_break_block",
+            "num_noop",
+        ]
 
-    # Compute grouped actions and action percentages.
-    # Whole episode player metrics.
-    num_move = sum(player_metrics[key] for key in move_metric_keys)
-    num_action_or_noop = sum(player_metrics[key] for key in action_or_noop_metric_keys)
-    summary_metrics.append(("num_move", num_move, float("nan")))
-    summary_metrics.append(
-        ("num_move_percentage", num_move / num_action_or_noop, float("nan"))
-    )
-    for action in ["num_place_block", "num_break_block", "num_noop"]:
-        num_action = player_metrics[action]
-        summary_metrics.append(
-            (f"{action}_percentage", num_action / num_action_or_noop, float("nan"))
+        # Compute grouped actions and action percentages.
+        # Whole episode player metrics.
+        num_move = sum(player_metrics[key] for key in move_metric_keys)
+        num_action_or_noop = sum(
+            player_metrics[key] for key in action_or_noop_metric_keys
         )
-    # Per-minute player metrics.
-    if per_minute_player_metrics:
-        for time in times:
-            num_move = sum(
-                per_minute_player_metrics[f"{key}_{time}_min"]
-                for key in move_metric_keys
+        summary_metrics.append(("num_move", num_move, player_idx, float("nan")))
+        summary_metrics.append(
+            (
+                "num_move_percentage",
+                num_move / num_action_or_noop,
+                player_idx,
+                float("nan"),
             )
-            num_action_or_noop = sum(
-                per_minute_player_metrics[f"{key}_{time}_min"]
-                for key in action_or_noop_metric_keys
-            )
-            summary_metrics.append(("num_move", num_move, time))
+        )
+        for action in ["num_place_block", "num_break_block", "num_noop"]:
+            num_action = player_metrics[action]
             summary_metrics.append(
-                ("num_move_percentage", num_move / num_action_or_noop, time)
-            )
-            for action in ["num_place_block", "num_break_block", "num_noop"]:
-                num_action = per_minute_player_metrics[f"{action}_{time}_min"]
-                summary_metrics.append(
-                    (f"{action}_percentage", num_action / num_action_or_noop, time)
+                (
+                    f"{action}_percentage",
+                    num_action / num_action_or_noop,
+                    player_idx,
+                    float("nan"),
                 )
+            )
+        # Per-minute player metrics.
+        if per_minute_player_metrics:
+            for time in times:
+                num_move = sum(
+                    per_minute_player_metrics[f"{key}_{time}_min"]
+                    for key in move_metric_keys
+                )
+                num_action_or_noop = sum(
+                    per_minute_player_metrics[f"{key}_{time}_min"]
+                    for key in action_or_noop_metric_keys
+                )
+                summary_metrics.append(("num_move", num_move, player_idx, time))
+                summary_metrics.append(
+                    (
+                        "num_move_percentage",
+                        num_move / num_action_or_noop,
+                        player_idx,
+                        time,
+                    )
+                )
+                for action in ["num_place_block", "num_break_block", "num_noop"]:
+                    num_action = per_minute_player_metrics[f"{action}_{time}_min"]
+                    summary_metrics.append(
+                        (
+                            f"{action}_percentage",
+                            num_action / num_action_or_noop,
+                            player_idx,
+                            time,
+                        )
+                    )
 
-    return pd.DataFrame(summary_metrics, columns=["metric", "value", "time"])
+    return pd.DataFrame(summary_metrics, columns=["metric", "value", "player", "time"])
 
     # TODO: delete this alternative way of computing grouped actions and action
     # percentages because it's less efficient.
