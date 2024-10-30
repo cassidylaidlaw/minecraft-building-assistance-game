@@ -1710,6 +1710,7 @@ def summarize_episode_metrics(episode_metrics: Dict[str, Any]) -> pd.DataFrame:
             "num_break_block",
             "num_noop",
         ]
+        place_or_break_metric_keys = ["num_place_block", "num_break_block"]
 
         # Compute grouped actions and action percentages.
         # Whole episode player metrics.
@@ -1736,6 +1737,21 @@ def summarize_episode_metrics(episode_metrics: Dict[str, Any]) -> pd.DataFrame:
                     float("nan"),
                 )
             )
+        num_place_or_break = sum(
+            player_metrics[key] for key in place_or_break_metric_keys
+        )
+        summary_metrics.append(
+            ("num_place_or_break_block", num_place_or_break, player_idx, float("nan"))
+        )
+        summary_metrics.append(
+            (
+                "num_place_or_break_block_percentage",
+                num_place_or_break / num_action_or_noop,
+                player_idx,
+                float("nan"),
+            )
+        )
+
         # Per-minute player metrics.
         if per_minute_player_metrics:
             for time in times:
@@ -1766,6 +1782,21 @@ def summarize_episode_metrics(episode_metrics: Dict[str, Any]) -> pd.DataFrame:
                             time,
                         )
                     )
+                num_place_or_break = sum(
+                    per_minute_player_metrics[f"{key}_{time}_min"]
+                    for key in place_or_break_metric_keys
+                )
+                summary_metrics.append(
+                    ("num_place_or_break_block", num_place_or_break, player_idx, time)
+                )
+                summary_metrics.append(
+                    (
+                        "num_place_or_break_block_percentage",
+                        num_place_or_break / num_action_or_noop,
+                        player_idx,
+                        time,
+                    )
+                )
 
     return pd.DataFrame(summary_metrics, columns=["metric", "value", "player", "time"])
 
