@@ -1325,7 +1325,9 @@ class SeparatedTransformerEncoder(nn.Module):
                 lstm_state,
                 seq_lens,
                 pre_layer_norm=(
-                    self.pre_lstm_layer_norms[lstm_index] if self.norm_first else None
+                    cast(nn.LayerNorm, self.pre_lstm_layer_norms[lstm_index])
+                    if self.norm_first
+                    else None
                 ),
             )
         else:

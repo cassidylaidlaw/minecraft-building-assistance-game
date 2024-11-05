@@ -131,6 +131,10 @@ class MbagMCTSNode:
             MbagAction.NUM_ACTION_TYPES, dtype=np.int64
         )
 
+        self.total_expected_reward = 0.0
+        self.total_expected_own_reward = 0.0
+        self.total_expected_reward_visits = 0
+
         self.action_type_dirichlet_noise = None
         self.dirichlet_noise = None
 
@@ -520,27 +524,44 @@ class MbagMCTSNode:
         action_children = [
             child for actions, child in self.children.items() if actions[0] == action
         ]
-        total_reward = 0
+        total_reward = 0.0
         total_visits = 0
-        total_own_reward = 0
+        total_own_reward = 0.0
         total_own_reward_visits = 0
         for child in action_children:
-            if (not self.mcts.use_goal_predictor) or child.is_expanded or child.done:
-                total_reward += child.number_visits * child.reward
-                total_visits += child.number_visits
             assert child.info is not None
-            total_own_reward += child.number_visits * child.info["own_reward"]
-            total_own_reward_visits += child.number_visits
+            total_reward += child.total_expected_reward
+            total_visits += child.total_expected_reward_visits
+            total_own_reward += child.total_expected_own_reward
+            total_own_reward_visits += child.total_expected_reward_visits
         expected_own_reward = total_own_reward / total_own_reward_visits
         expected_reward = total_reward / total_visits
         return expected_reward, expected_own_reward
 
-    def backup(self, value):
-        current = self
+    def backup(self, value, goal_logits: Optional[np.ndarray] = None):
+        current: MbagMCTSNode = self
         value = float(value)
         while True:
+            if goal_logits is not None and isinstance(current.parent, MbagMCTSNode):
+                assert current.info is not None
+                reward = self.env.get_reward_with_other_agent_actions(
+                    current.parent.obs,
+                    current.info,
+                    goal_logits,
+                    update_own_reward=True,
+                )
+            else:
+                reward = current.reward
+
+            current.total_expected_reward += reward
+            if current.info is not None:
+                current.total_expected_own_reward += current.info["own_reward"]
+            else:
+                current.total_expected_own_reward += 0
+            current.total_expected_reward_visits += 1
+
             value *= self.mcts.gamma
-            value += current.reward
+            value += reward
             current._number_visits += 1
             current._total_value += value
 
@@ -652,10 +673,18 @@ class MbagMCTS(MCTS):
         self.predict_goal_using_average = mcts_param.get(
             "predict_goal_using_average", False
         )
-        if self.predict_goal_using_next_state and self.predict_goal_using_average:
+        self.predict_goal_using_future_states = mcts_param.get(
+            "predict_goal_using_future_states", False
+        )
+        if (
+            int(self.predict_goal_using_next_state)
+            + int(self.predict_goal_using_average)
+            + int(self.predict_goal_using_future_states)
+        ) > 1:
             raise ValueError(
-                "predict_goal_using_next_state and predict_goal_using_average "
-                "cannot both be True"
+                "No more than one of predict_goal_using_next_state, "
+                "predict_goal_using_average, and predict_goal_using_future_states "
+                "can be True."
             )
         self.expected_own_reward_scale: float = mcts_param.get(
             "expected_own_reward_scale", 1
@@ -780,7 +809,15 @@ class MbagMCTS(MCTS):
                         and leaf == nodes[env_index],
                         model_state_out=[state[env_index] for state in model_state_out],
                     )
-                leaf.backup(value)
+                leaf.backup(
+                    value,
+                    goal_logits=(
+                        goal_logits[env_index]
+                        if self.predict_goal_using_future_states
+                        and goal_logits is not None
+                        else None
+                    ),
+                )
 
         # Tree policy target (TPT)
         if self.sample_from_full_support_policy:

@@ -18,6 +18,7 @@ import torch
 import tqdm
 from ray.rllib.utils.typing import PolicyID
 from sacred import SETTINGS, Experiment
+from sacred.observers import FileStorageObserver
 
 import mbag
 from mbag.agents.heuristic_agents import ALL_HEURISTIC_AGENTS
@@ -71,6 +72,24 @@ def sacred_config():
     num_simulations = None  # noqa: F841
     goal_set = None  # noqa: F841
     house_id = None  # noqa: F841
+
+    # Output directory/logging
+    time_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    if not experiment_tag.endswith("_") and experiment_tag != "":
+        experiment_tag += "_"
+    if out_dir is None:
+        for checkpoint in checkpoints:
+            if checkpoint is not None:
+                out_dir = os.path.join(
+                    checkpoint,
+                    f"evaluate_{experiment_tag}{time_str}",
+                )
+                break
+    if out_dir is None:
+        raise ValueError("out_dir must be set if no checkpoints are provided")
+
+    observer = FileStorageObserver(out_dir)
+    ex.observers.append(observer)
 
 
 @ex.named_config
@@ -321,28 +340,16 @@ def main(  # noqa: C901
     record_video: bool,
     use_malmo: bool,
     num_workers: int,
-    out_dir: Optional[str],
     save_episodes: bool,
+    observer: FileStorageObserver,
     _log: Logger,
 ):
     if num_workers > 0:
         mp.set_start_method("spawn")
     mbag.logger.setLevel(_log.getEffectiveLevel())
 
-    time_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    if not experiment_tag.endswith("_") and experiment_tag != "":
-        experiment_tag += "_"
-    if out_dir is None:
-        for checkpoint in checkpoints:
-            if checkpoint is not None:
-                out_dir = os.path.join(
-                    checkpoint,
-                    f"evaluate_{experiment_tag}{time_str}",
-                )
-                break
-    if out_dir is None:
-        raise ValueError("out_dir must be set if no checkpoints are provided")
-    os.makedirs(out_dir, exist_ok=True)
+    out_dir = observer.dir
+    assert out_dir is not None
 
     processes: List[mp.Process] = []
     queues: List[mp.Queue] = []

@@ -69,6 +69,8 @@ jobs:
           if kill -0 \$CMD_PID 2>/dev/null; then
               # Command is still running, terminate it
               kill \$CMD_PID
+              sleep 10
+              kill -9 \$CMD_PID 2>/dev/null
               wait \$CMD_PID # Capture the exit code of the command
               EXIT_CODE=\$?
               echo "Command terminated after 60 seconds."
@@ -93,6 +95,7 @@ jobs:
           pip install -e .[rllib,malmo]
           
       - name: Running assistants in Minecraft
+        timeout-minutes: 10
         run: |
           xvfb-run --auto-servernum --server-args="-screen 0 1024x768x24" python -m malmo.minecraft launch --num_instances 2 --goal_visibility True False &
           MC_PID=$!
@@ -101,8 +104,8 @@ jobs:
             sleep 1
           done
 
-          ./test_command.sh python -m mbag.scripts.evaluate with human_with_assistant assistant_checkpoint=data/example_assistant/checkpoint_000100
+          ./test_command.sh python -m mbag.scripts.evaluate with human_with_assistant assistant_checkpoint=data/example_assistant/checkpoint_001700
 
-          ./test_command.sh python -m mbag.scripts.evaluate with human_alone assistant_checkpoint=data/example_assistant/checkpoint_000100
+          ./test_command.sh python -m mbag.scripts.evaluate with human_alone assistant_checkpoint=data/example_assistant/checkpoint_001700
 
           kill $MC_PID
