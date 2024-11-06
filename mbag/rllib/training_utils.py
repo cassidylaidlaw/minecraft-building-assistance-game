@@ -105,6 +105,7 @@ def load_policy(
     policy_state["policy_spec"]["config"] = Algorithm.merge_algorithm_configs(
         policy_state["policy_spec"]["config"],
         config_updates,
+        _allow_unknown_configs=True,
     )
 
     if observation_space is not None:
