@@ -23,7 +23,6 @@ from ray.tune.registry import ENV_CREATOR, _global_registry, get_trainable_cls
 from sacred import SETTINGS as SACRED_SETTINGS
 from sacred import Experiment
 from sacred.config.custom_containers import DogmaticDict
-from sacred.observers import FileStorageObserver
 from typing_extensions import Literal
 
 import mbag
@@ -53,7 +52,10 @@ from mbag.rllib.gail import MbagGAILConfig, MbagGAILTorchPolicy
 from mbag.rllib.os_utils import available_cpu_count
 from mbag.rllib.policies import MbagAgentPolicy
 from mbag.rllib.ppo import MbagPPOConfig, MbagPPOTorchPolicy
-from mbag.rllib.sacred_utils import convert_dogmatics_to_standard
+from mbag.rllib.sacred_utils import (
+    NoTypeAnnotationsFileStorageObserver,
+    convert_dogmatics_to_standard,
+)
 from mbag.rllib.torch_models import (
     MbagRecurrentConvolutionalModelConfig,
     MbagTransformerModelConfig,
@@ -84,13 +86,6 @@ torch.backends.cudnn.allow_tf32 = True
 
 # Useful for debugging when training freezes.
 faulthandler.register(signal.SIGUSR1)
-
-
-class NoTypeAnnotationsFileStorageObserver(FileStorageObserver):
-    def save_json(self, obj, filename):
-        if isinstance(obj, dict) and "__annotations__" in obj:
-            del obj["__annotations__"]
-        return super().save_json(obj, filename)
 
 
 @ex.config

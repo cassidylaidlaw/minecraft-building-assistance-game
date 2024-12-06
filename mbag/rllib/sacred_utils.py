@@ -3,6 +3,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from sacred.config.custom_containers import DogmaticDict, DogmaticList
+from sacred.observers import FileStorageObserver
 
 # Fix for sacred issue that DogmaticDicts and DogmaticLists don't deepcopy correctly.
 # This is a hacky fix, but it works for now.
@@ -44,3 +45,10 @@ def convert_dogmatics_to_standard(obj: Any) -> Any:
         return [convert_dogmatics_to_standard(elem) for elem in obj]
     else:
         return obj
+
+
+class NoTypeAnnotationsFileStorageObserver(FileStorageObserver):
+    def save_json(self, obj, filename):
+        if isinstance(obj, dict) and "__annotations__" in obj:
+            del obj["__annotations__"]
+        return super().save_json(obj, filename)
