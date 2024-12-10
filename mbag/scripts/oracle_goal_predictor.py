@@ -1,28 +1,28 @@
-import json
 import pandas
 import os
-import pathlib
 import pickle
 import torch
 import zipfile
 from logging import Logger
-from typing import List, Literal, Tuple, cast
+from typing import List, Literal, Optional, Tuple
 
-import matplotlib.pyplot as plt
 import numpy as np
-import seaborn as sns
 import tqdm
 
-from mbag.environment.goals.craftassist import CraftAssistGoalGenerator
-from mbag.environment.goals.goal_transform import TransformedGoalGenerator
 from mbag.environment.blocks import MinecraftBlocks
-from mbag.environment.state import mbag_obs_to_state
+from mbag.environment.goals.craftassist import (
+    CraftAssistGoalGenerator,
+    NoRemainingHouseError,
+)
+from mbag.environment.goals.goal_generator import GoalGeneratorConfig
+from mbag.environment.goals.goal_transform import TransformedGoalGenerator
 from mbag.environment.types import (
     CURRENT_BLOCKS,
     GOAL_BLOCKS,
     LAST_INTERACTED,
     CURRENT_PLAYER,
     OTHER_PLAYER,
+    MbagObs,
     WorldSize,
 )
 from mbag.evaluation.episode import MbagEpisode
@@ -36,6 +36,17 @@ GoalProbsMethod = Literal["neg", "exp_neg", "inv", "exp_inv"]
 PROB_EPS = 1e-6
 
 ex = Experiment("oracle_goal_predictor")
+
+
+def get_goal_size_from_world_size(world_size: WorldSize) -> WorldSize:
+    # The goal width and depth are smaller than the world by 2 to allow players to move
+    # around the goal. The goal height is smaller by 2 because the bottom layer is
+    # bedrock and the top layer must be air to allow players to stand on the goal.
+    return (
+        world_size[0] - 2,
+        world_size[1] - 2,
+        world_size[2] - 2,
+    )
 
 
 def get_padded_goals(goal: np.ndarray, size: WorldSize) -> List[np.ndarray]:
@@ -132,53 +143,122 @@ def calculate_goal_probs(
     return goal_probs
 
 
-def predict_goal(
-    episode: MbagEpisode,
-    goals: List[MinecraftBlocks],
-    world_size: WorldSize,
-    goal_size: WorldSize,
-    normalize_goal_distance: bool = False,
-    use_raw_goal_distance: bool = False,
-    predict_entire_world: bool = False,
-    goal_probs_method: GoalProbsMethod = "exp_neg",
-    n_steps: int = 20,
-    alpha: float = 1,
-    beta: float = 1,
-) -> Tuple[List[int], np.ndarray, np.ndarray, np.ndarray]:
-    goal_pred_shape = (
-        world_size + (MinecraftBlocks.NUM_BLOCKS,)
-        if predict_entire_world
-        else goal_size + (MinecraftBlocks.NUM_BLOCKS,)
-    )
+def maybe_load_generated_goals(
+    data_dir: str, subset: str
+) -> Optional[List[MinecraftBlocks]]:
+    goals_dir = os.path.join(data_dir, f"houses/{subset}/blocks")
+    goals_path = os.path.join(goals_dir, "goals.pkl")
+    if os.path.exists(goals_path):
+        with open(goals_path, "rb") as f:
+            goals = pickle.load(f)
+        # TODO: replace with logger.info call.
+        print(f"Loaded generated goals from {goals_path}.")
+        return goals
+    else:
+        return None
 
-    goal_slice = (
-        slice(1, 1 + goal_size[0]),
-        slice(1, 1 + goal_size[1]),
-        slice(1, 1 + goal_size[2]),
-    )
 
-    cross_entropy_per_step = []
-    goal_probs_per_step = []
-    goal_distances_per_step = []
-    raw_goal_distances_per_step = []
-    # Raw distances from the candidate goals to the true goal for each step.
-    # Common shape: [num_steps, num_candidate_goals]. Next dimension is the number of
-    # padded versions of the same candidate gaol. Only needed for debugging.
-    raw_distances_goal_to_true_goal_per_step = []
+DEFAULT_ORACLE_GOAL_PREDICTOR_CONFIG = dict(
+    normalize_goal_distance=False,
+    use_raw_goal_distance=False,
+    predict_entire_world=True,
+    goal_probs_method="exp_neg",
+    alpha=3,
+    beta=1,
+    expect_true_goal_is_generated=True,
+    ignore_own_actions=False,
+)
 
-    steps = list(range(0, len(episode.obs_history), n_steps))
-    if steps[-1] != len(episode.obs_history) - 1:
-        steps.append(len(episode.obs_history) - 1)
 
-    for step in tqdm.tqdm(steps, desc="Steps", leave=False):
-        # Get the observation at the step from one of the players; it does not matter which.
-        obs = episode.obs_history[step][0]
-        world_obs = obs[0]
+class OracleGoalPredictor:
+    def __init__(
+        self,
+        goal_generator_config: GoalGeneratorConfig,
+        world_size: WorldSize,
+        goal_size: WorldSize,
+    ) -> None:
+        self.goal_generator = TransformedGoalGenerator(goal_generator_config)
+        maybe_goals = maybe_load_generated_goals(
+            goal_generator_config["goal_generator_config"]["data_dir"],
+            goal_generator_config["goal_generator_config"]["subset"],
+        )
+        self.goals = (
+            maybe_goals if maybe_goals is not None else self._generate_goals(goal_size)
+        )
+
+        self.world_size = world_size
+        self.goal_size = goal_size
+
+    def _generate_goals(self, goal_size) -> List[MinecraftBlocks]:
+        craftassist_goal_generator = self.goal_generator.base_goal_generator
+        if not isinstance(craftassist_goal_generator, CraftAssistGoalGenerator):
+            raise ValueError(
+                "The base_goal_generator of the goal generator must be a "
+                "CraftAssistGoalGenerator to use the OracleGoalPredictor."
+            )
+
+        goals = []
+        num_remaining_houses = len(craftassist_goal_generator.house_ids)
+        with tqdm.tqdm(total=len(craftassist_goal_generator.house_ids)) as pbar:
+            while True:
+                try:
+                    goal = self.goal_generator.generate_goal(goal_size)
+                    new_num_remaining_houses = len(
+                        craftassist_goal_generator.remaining_house_ids
+                    )
+                    pbar.update(num_remaining_houses - new_num_remaining_houses)
+                    num_remaining_houses = new_num_remaining_houses
+                    goals.append(goal)
+                except NoRemainingHouseError:
+                    break
+
+        return goals
+
+    def predict_goal(
+        self,
+        obs: MbagObs,
+        normalize_goal_distance: bool = False,
+        use_raw_goal_distance: bool = False,
+        predict_entire_world: bool = True,
+        goal_probs_method: GoalProbsMethod = "exp_neg",
+        alpha: float = 3,
+        beta: float = 1,
+        expect_true_goal_is_generated: bool = True,
+        ignore_own_actions: bool = False,
+    ) -> Tuple[np.ndarray, float, List[float], List[float], List[float]]:
+        """Predicts the goal logits from the current observation and goals.
+
+        Returns:
+            Goal logits array with shape (NUM_BLOCKS, width, height, depth).
+        """
+        goal_pred_shape = (
+            self.world_size + (MinecraftBlocks.NUM_BLOCKS,)
+            if predict_entire_world
+            else self.goal_size + (MinecraftBlocks.NUM_BLOCKS,)
+        )
+
+        goal_slice = (
+            slice(1, 1 + self.goal_size[0]),
+            slice(1, 1 + self.goal_size[1]),
+            slice(1, 1 + self.goal_size[2]),
+        )
 
         # Get the true goal blocks.
+        world_obs = obs[0]
         true_goal_blocks = world_obs[GOAL_BLOCKS]
         if not predict_entire_world:
             true_goal_blocks = true_goal_blocks[goal_slice]
+
+        current_blocks = world_obs[CURRENT_BLOCKS]
+        # Mask for blocks that have been interacted with, not considering the
+        # bottom bedrock layer.
+        interacted_mask = world_obs[LAST_INTERACTED] == OTHER_PLAYER
+        if not ignore_own_actions:
+            interacted_mask |= world_obs[LAST_INTERACTED] == CURRENT_PLAYER
+
+        if not predict_entire_world:
+            current_blocks = current_blocks[goal_slice]
+            interacted_mask = interacted_mask[goal_slice]
 
         closest_transformed_goals = []
         goal_distances = []
@@ -187,9 +267,9 @@ def predict_goal(
         # Raw distances from the candidate goals to the true goal. Only needed for debugging.
         raw_distances_goal_to_true_goal = []
 
-        for i, goal in enumerate(goals):
+        for i, goal in enumerate(self.goals):
             # Get all the padded goals. Equivalent to the randomly_place transform.
-            padded_goals = get_padded_goals(goal.blocks, goal_size)
+            padded_goals = get_padded_goals(goal.blocks, self.goal_size)
             # Get the fully transformed goals by adding grass.
             transformed_goals = [
                 add_grass(padded_goal, "surround") for padded_goal in padded_goals
@@ -197,7 +277,7 @@ def predict_goal(
             # Place the goals in the world (if needed).
             if predict_entire_world:
                 transformed_goals = [
-                    place_goal_in_world(transformed_goal, world_size=world_size)
+                    place_goal_in_world(transformed_goal, world_size=self.world_size)
                     for transformed_goal in transformed_goals
                 ]
 
@@ -206,16 +286,6 @@ def predict_goal(
             transformed_raw_distances_goal_to_true_goal = []
 
             for transformed_goal in transformed_goals:
-                current_blocks = world_obs[CURRENT_BLOCKS]
-                # Mask for blocks that have been interacted with, not considering the
-                # bottom bedrock layer.
-                interacted_mask = (world_obs[LAST_INTERACTED] == CURRENT_PLAYER) | (
-                    world_obs[LAST_INTERACTED] == OTHER_PLAYER
-                )
-                if not predict_entire_world:
-                    current_blocks = current_blocks[goal_slice]
-                    interacted_mask = interacted_mask[goal_slice]
-
                 # Mask for current blocks that are different from the goal.
                 goal_distance_array = current_blocks != transformed_goal
                 # Raw goal distance is the number of blocks that are different from the
@@ -228,8 +298,6 @@ def predict_goal(
 
                 transformed_goal_distances.append(goal_distance)
                 transformed_raw_goal_distances.append(raw_goal_distance)
-                # TODO: only compute this once, not for each step, since the true goal and the candidate
-                # goals do not change per step.
                 # Raw distance from the padded candidate goal to the true goal.
                 transformed_raw_distances_goal_to_true_goal.append(
                     (true_goal_blocks != transformed_goal).sum()
@@ -249,10 +317,9 @@ def predict_goal(
             # Optionally normalize the goal distance by the number of placeable blocks in
             # the goal.
             if normalize_goal_distance:
-                closest_goal_distance /= (
-                    (closest_transformed_goal != MinecraftBlocks.BEDROCK)
-                    & (closest_transformed_goal != MinecraftBlocks.AIR)
-                ).sum()
+                num_blocks_considered = interacted_mask.sum()
+                if num_blocks_considered > 0:
+                    closest_goal_distance /= num_blocks_considered
 
             closest_transformed_goals.append(closest_transformed_goal)
             goal_distances.append(closest_goal_distance)
@@ -260,10 +327,6 @@ def predict_goal(
             raw_distances_goal_to_true_goal.append(
                 transformed_raw_distances_goal_to_true_goal
             )
-
-        goal_distances_per_step.append(goal_distances)
-        raw_goal_distances_per_step.append(raw_goal_distances)
-        raw_distances_goal_to_true_goal_per_step.append(raw_distances_goal_to_true_goal)
 
         # Compute goal probabilities from the distances.
         goal_distances_for_goal_probs = np.array(
@@ -275,7 +338,6 @@ def predict_goal(
             alpha=alpha,
             beta=beta,
         )
-        goal_probs_per_step.append(goal_probs)
 
         # Set the goal block type probabilities according to the probabilities of the goals.
         goal_blocks_probs = np.zeros(goal_pred_shape)
@@ -298,7 +360,22 @@ def predict_goal(
             goal_blocks_probs.sum(axis=-1), 1
         ), "Goal block probabilities do not sum to 1 across block types."
 
-        # Compute the cross-entropy between the true goal and the goal block probabilities.
+        # If the true goal is expected to have been generated, check that the distance
+        # from the closest goal to the true goal is 0.
+        if expect_true_goal_is_generated:
+            # Find the true goal index.
+            min_raw_distances_goal_to_true_goal = np.array(
+                [min(x) for x in raw_distances_goal_to_true_goal]
+            )
+            true_goal_idx = np.argmin(min_raw_distances_goal_to_true_goal)
+            assert min_raw_distances_goal_to_true_goal[true_goal_idx] == 0, (
+                "The distance from the closest goal to the true goal is not 0. Got: "
+                f"{min_raw_distances_goal_to_true_goal[true_goal_idx]}."
+            )
+
+        # TODO: maybe remove cross-entropy calculation if it's just for debugging.
+        # Compute the cross-entropy between the true goal and the goal block
+        # probabilities.
         float_goal_blocks_probs = goal_blocks_probs.reshape(
             -1, goal_blocks_probs.shape[-1]
         )
@@ -306,31 +383,79 @@ def predict_goal(
         cross_entropy = torch.nn.functional.cross_entropy(
             torch.from_numpy(np.log(float_goal_blocks_probs)).float(),
             torch.from_numpy(flat_true_goal_blocks).long(),
+        ).item()
+
+        # Reshape to (NUM_BLOCKS, width, height, depth).
+        goal_blocks_probs = goal_blocks_probs.transpose(3, 0, 1, 2)
+
+        return (
+            goal_blocks_probs,
+            cross_entropy,
+            goal_distances,
+            raw_goal_distances,
+            raw_distances_goal_to_true_goal,
         )
-        cross_entropy_per_step.append(cross_entropy.item())
 
-    # Find the true goal index.
-    min_raw_distances_goal_to_true_goal_per_step = np.array(
-        [min(x) for x in raw_distances_goal_to_true_goal_per_step[-1]]
-    )
-    true_goal_idx = np.argmin(min_raw_distances_goal_to_true_goal_per_step)
-    assert min_raw_distances_goal_to_true_goal_per_step[true_goal_idx] == 0, (
-        "The distance from the closest goal to the true goal is not 0. Got: "
-        f"{min_raw_distances_goal_to_true_goal_per_step[true_goal_idx]}."
-    )
 
-    # Compute the rank of the true goal at each step according to the predicted goal
-    # probabilities.
-    true_goal_rank_per_step = (
-        len(goals)
-        - np.where(np.array(goal_probs_per_step).argsort(axis=1) == true_goal_idx)[1]
-    )
+def predict_goal_for_episode(
+    episode: MbagEpisode,
+    goal_predictor: OracleGoalPredictor,
+    player_idx: int,
+    normalize_goal_distance: bool = False,
+    use_raw_goal_distance: bool = False,
+    predict_entire_world: bool = False,
+    goal_probs_method: GoalProbsMethod = "exp_neg",
+    n_steps: int = 20,
+    alpha: float = 1,
+    beta: float = 1,
+    expect_true_goal_is_generated: bool = True,
+    ignore_own_actions: bool = False,
+) -> Tuple[List[int], np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    cross_entropy_per_step = []
+    goal_probs_per_step = []
+    goal_distances_per_step = []
+    raw_goal_distances_per_step = []
+    # Raw distances from the candidate goals to the true goal for each step.
+    # Common shape: [num_steps, num_candidate_goals]. Next dimension is the number of
+    # padded versions of the same candidate gaol. Only needed for debugging.
+    raw_distances_goal_to_true_goal_per_step = []
+
+    steps = list(range(0, len(episode.obs_history), n_steps))
+    if steps[-1] != len(episode.obs_history) - 1:
+        steps.append(len(episode.obs_history) - 1)
+
+    for step in tqdm.tqdm(steps, desc="Steps", leave=False):
+        obs = episode.obs_history[step][player_idx]
+        (
+            goal_blocks_probs,
+            cross_entropy,
+            goal_distances,
+            raw_goal_distances,
+            raw_distances_goal_to_true_goal,
+        ) = goal_predictor.predict_goal(
+            obs,
+            normalize_goal_distance=normalize_goal_distance,
+            use_raw_goal_distance=use_raw_goal_distance,
+            predict_entire_world=predict_entire_world,
+            goal_probs_method=goal_probs_method,
+            alpha=alpha,
+            beta=beta,
+            expect_true_goal_is_generated=expect_true_goal_is_generated,
+            ignore_own_actions=ignore_own_actions,
+        )
+        goal_probs_per_step.append(goal_blocks_probs)
+        cross_entropy_per_step.append(cross_entropy)
+        goal_distances_per_step.append(goal_distances)
+        raw_goal_distances_per_step.append(raw_goal_distances)
+        raw_distances_goal_to_true_goal_per_step.append(raw_distances_goal_to_true_goal)
 
     return (
         steps,
         np.array(cross_entropy_per_step),
         np.array(goal_probs_per_step),
-        true_goal_rank_per_step,
+        np.array(goal_distances_per_step),
+        np.array(raw_goal_distances_per_step),
+        np.array(raw_distances_goal_to_true_goal_per_step),
     )
 
 
@@ -362,22 +487,19 @@ def sacred_config() -> None:
     if not os.path.exists(episodes_path):
         raise ValueError(f"Episodes file not found: {episodes_path}")
 
-    data_dir = "/nas/ucb/ebronstein/minecraft-building-assistance-game/data/craftassist"
+    data_dir = "/nas/ucb/ebronstein/minecraft-building-assistance-game/data/craftassist"  # noqa: F841
     subset = "small200"
-    goals_dir = os.path.join(data_dir, f"houses/{subset}/blocks")
-    goals_path = os.path.join(goals_dir, "goals.pkl")
-    if not os.path.exists(goals_path):
-        raise ValueError(f"Goals file not found: {goals_path}")
+    repeat_goal = False  # noqa: F841
 
     world_width = 11  # noqa: F841
     world_height = 10  # noqa: F841
     world_depth = 10  # noqa: F841
     world_size = (world_width, world_height, world_depth)
-    goal_width = world_width - 2
-    goal_height = world_height - 2
-    goal_depth = world_depth - 2
-    goal_size = (goal_width, goal_height, goal_depth)
+    goal_size = get_goal_size_from_world_size(world_size)
 
+    # Index of the player whose perspective is used to predict the goal.
+    # Typically, human is 0 and assistant is 1.
+    player_idx = 0
     # If True, the goal distance is divided by the number of blocks in the goal.
     normalize_goal_distance = False
     """If True, the raw goal distance is used to compute goal probabilities instead of
@@ -393,6 +515,13 @@ def sacred_config() -> None:
     beta = 1
     # Predictions are made for every n_steps steps.
     n_steps = 20
+    # If True, the true goal in the episode is expected to have been generated by the
+    # goal generator. In this case, check that the distance from the closest candidate
+    # goal to the true goal is zero.
+    expect_true_goal_is_generated = True  # noqa: F841
+    # Ignore the actions of the player whose perspective is being used to predict the
+    # goal.
+    ignore_own_actions = False  # noqa: F841
 
     out_dir = os.path.join(
         episodes_eval_dir,
@@ -416,9 +545,12 @@ def sacred_config() -> None:
 @ex.automain
 def main(
     episodes_path: str,
-    goals_path: str,
+    data_dir: str,
+    subset: str,
+    repeat_goal: bool,
     world_size: WorldSize,
     goal_size: WorldSize,
+    player_idx: int,
     normalize_goal_distance: bool,
     use_raw_goal_distance: bool,
     predict_entire_world: bool,
@@ -426,31 +558,67 @@ def main(
     n_steps: int,
     alpha: float,
     beta: float,
+    expect_true_goal_is_generated: bool,
+    ignore_own_actions: bool,
     observer: NoTypeAnnotationsFileStorageObserver,
     _log: Logger,
 ) -> None:
+    goal_generator_config = {
+        "goal_generator": "craftassist",
+        "goal_generator_config": {
+            "data_dir": data_dir,
+            "subset": subset,
+            "repeat": repeat_goal,
+        },
+        "transforms": [
+            {"config": {"connectivity": 18}, "transform": "largest_cc"},
+            {"transform": "crop_air"},
+            {
+                "config": {"density_threshold": 0.1},
+                "transform": "crop_low_density_bottom_layers",
+            },
+            {"config": {"min_size": [4, 4, 4]}, "transform": "min_size_filter"},
+            {
+                "config": {
+                    "interpolate": True,
+                    "interpolation_order": 1,
+                    "max_scaling_factor": 2,
+                    "max_scaling_factor_ratio": 1.5,
+                    "preserve_paths": True,
+                    "scale_y_independently": True,
+                },
+                "transform": "area_sample",
+            },
+            {
+                "config": {"max_density": 1, "min_density": 0},
+                "transform": "density_filter",
+            },
+        ],
+    }
+
     # Load the episodes.
     with zipfile.ZipFile(episodes_path, "r") as episodes_zip:
         with episodes_zip.open("episodes.pickle") as episodes_file:
             episodes = pickle.load(episodes_file)
 
-    # Load the goals.
-    with open(goals_path, "rb") as f:
-        goals = pickle.load(f)
+    goal_predictor = OracleGoalPredictor(
+        goal_generator_config, tuple(world_size), tuple(goal_size)
+    )
 
     rows = []
-    for episode_idx in tqdm.trange(100, desc="Episodes", leave=False):
+    for episode_idx in tqdm.trange(len(episodes), desc="Episodes", leave=False):
         episode = episodes[episode_idx]
         (
             steps,
             cross_entropy_per_step,
             goal_probs_per_step,
-            true_goal_rank_per_step,
-        ) = predict_goal(
+            goal_distances_per_step,
+            raw_goal_distances_per_step,
+            raw_distances_goal_to_true_goal_per_step,
+        ) = predict_goal_for_episode(
             episode,
-            goals,
-            cast(WorldSize, tuple(world_size)),
-            cast(WorldSize, tuple(goal_size)),
+            goal_predictor,
+            player_idx,
             normalize_goal_distance=normalize_goal_distance,
             use_raw_goal_distance=use_raw_goal_distance,
             predict_entire_world=predict_entire_world,
@@ -458,20 +626,28 @@ def main(
             n_steps=n_steps,
             alpha=alpha,
             beta=beta,
+            expect_true_goal_is_generated=expect_true_goal_is_generated,
+            ignore_own_actions=ignore_own_actions,
         )
         episode_rows = [
             {
                 "episode": episode_idx,
                 "step": step,
-                "goal_probs_method": goal_probs_method,
                 "normalize_goal_distance": normalize_goal_distance,
                 "use_raw_goal_distance": use_raw_goal_distance,
                 "predict_entire_world": predict_entire_world,
+                "goal_probs_method": goal_probs_method,
                 "alpha": alpha,
                 "beta": beta,
+                "expect_true_goal_is_generated": expect_true_goal_is_generated,
+                "ignore_own_actions": ignore_own_actions,
                 "cross_entropy": cross_entropy_per_step[i],
                 "goal_probs": goal_probs_per_step[i],
-                "true_goal_rank": true_goal_rank_per_step[i],
+                # "goal_distances": goal_distances_per_step[i],
+                # "raw_goal_distances": raw_goal_distances_per_step[i],
+                # "raw_distances_goal_to_true_goal": raw_distances_goal_to_true_goal_per_step[
+                #     i
+                # ],
             }
             for i, step in enumerate(steps)
         ]
