@@ -7,7 +7,10 @@ from typing import List
 import tqdm
 from sacred import Experiment
 
-from mbag.environment.goals.craftassist import CraftAssistGoalGenerator
+from mbag.environment.goals.craftassist import (
+    CraftAssistGoalGenerator,
+    NoRemainingHouseError,
+)
 from mbag.environment.goals.goal_transform import TransformedGoalGenerator
 from mbag.environment.blocks import MinecraftBlocks
 from mbag.environment.types import WorldSize
@@ -81,7 +84,7 @@ def generate_goals(
                 pbar.update(num_remaining_houses - new_num_remaining_houses)
                 num_remaining_houses = new_num_remaining_houses
                 goals.append(goal)
-            except ValueError:
+            except NoRemainingHouseError:
                 break
 
     return goals
