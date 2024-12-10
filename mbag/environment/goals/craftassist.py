@@ -42,6 +42,10 @@ class CraftAssistStats(TypedDict):
     player_minutes: Dict[str, float]
 
 
+class NoRemainingHouseError(Exception):
+    """Raised when there are no more houses to generate."""
+
+
 class CraftAssistGoalGenerator(GoalGenerator):
     config: CraftAssistGoalConfig
     house_ids: List[str]
@@ -104,7 +108,7 @@ class CraftAssistGoalGenerator(GoalGenerator):
 
     def generate_goal(self, size: WorldSize) -> MinecraftBlocks:
         if not self.config["repeat"] and not self.remaining_house_ids:
-            raise ValueError(
+            raise NoRemainingHouseError(
                 "No more houses to generate. Set repeat to True to repeat houses."
             )
 
