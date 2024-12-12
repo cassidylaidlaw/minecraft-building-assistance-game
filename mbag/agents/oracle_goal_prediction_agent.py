@@ -1,7 +1,7 @@
 import copy
 import os
 import pickle
-from typing import Any, List, Optional
+from typing import Any, List, Optional, get_args
 
 import numpy as np
 import torch
@@ -29,11 +29,11 @@ from mbag.environment.types import (
     MbagObs,
     WorldSize,
 )
+from mbag.environment.goals.transforms import AddGrassMode
 from mbag.rllib.alpha_zero.planning import create_mbag_env_model
 from mbag.rllib.rllib_env import unwrap_mbag_env
 
-# Methods of computing goal probabilities from goal distances.
-GoalProbsMethod = Literal["neg", "exp_neg", "inv", "exp_inv"]
+
 # Small value to add to the goal probabilities to avoid division by zero.
 PROB_EPS = 1e-6
 
@@ -52,8 +52,13 @@ def get_goal_size_from_world_size(world_size: WorldSize) -> WorldSize:
     )
 
 
-# TODO: maybe replace with RandomlyPlaceTransform.
 def get_padded_goals(goal: np.ndarray, size: WorldSize) -> List[np.ndarray]:
+    """Get all the padded goals that fit in a world of the given size.
+
+    The goal can be placed in any (x, z) position in the world, while the y position is
+    fixed to 1. The goal is padded with air (zeros). This implementation is based on
+    mbag.environment.goals.transforms.RandomlyPlaceTransform.
+    """
     padded_goals = []
     for offset_x in range(0, size[0] - goal.shape[0] + 1):
         for offset_z in range(0, size[2] - goal.shape[2] + 1):
@@ -69,9 +74,12 @@ def get_padded_goals(goal: np.ndarray, size: WorldSize) -> List[np.ndarray]:
     return padded_goals
 
 
-# TODO: maybe replace this with AddGrassTransform.
-def add_grass(goal: np.ndarray, mode: str) -> np.ndarray:
-    assert mode in ["concatenate", "replace", "surround"], f"Invalid mode: {mode}"
+def add_grass(goal: np.ndarray, mode: AddGrassMode) -> np.ndarray:
+    """Add grass blocks to the goal.
+
+    This implementation is based on mbag.environment.goals.transforms.AddGrassTransform.
+    """
+    assert mode in get_args(AddGrassMode), f"Invalid mode: {mode}"
 
     goal = goal.copy()
     if mode == "concatenate":
@@ -96,11 +104,8 @@ def add_grass(goal: np.ndarray, mode: str) -> np.ndarray:
 def place_goal_in_world(goal: np.ndarray, world_size: WorldSize) -> np.ndarray:
     """Place the goal in the world."""
     goal_in_world = np.zeros(world_size, np.uint8)
-    # Set the bottom layer to bedrock.
     goal_in_world[:, 0, :] = MinecraftBlocks.BEDROCK
-    # Set the 1-th layer to dirt.
     goal_in_world[:, 1, :] = MinecraftBlocks.NAME2ID["dirt"]
-    # Place the goal in the world.
     goal_slice = (
         slice(1, 1 + goal.shape[0]),
         slice(1, 1 + goal.shape[1]),
@@ -110,13 +115,31 @@ def place_goal_in_world(goal: np.ndarray, world_size: WorldSize) -> np.ndarray:
     return goal_in_world
 
 
+# Methods of computing goal probabilities from goal distances.
+GoalProbsMethod = Literal["neg", "exp_neg", "inv", "exp_inv"]
+
+
 def calculate_goal_probs(
     goal_distances: np.ndarray,
     goal_probs_method: GoalProbsMethod,
     alpha: float = 1,
     beta: float = 1,
 ) -> np.ndarray:
-    """Calculate the probabilities of the goals based on the goal distances."""
+    """Calculate the probabilities of the goals based on the goal distances.
+
+    Args:
+        goal_distances: Distances to the goals.
+        goal_probs_method: Method of computing goal probabilities from goal distances.
+        alpha: Alpha parameter for the goal probabilities method.
+        beta: Beta parameter for the goal probabilities method.
+
+    Returns:
+        The probabilities of the goals.
+    """
+    assert goal_probs_method in get_args(
+        GoalProbsMethod
+    ), f"Invalid goal_probs_method: {goal_probs_method}"
+
     if goal_probs_method == "neg":
         # Option 1: negative goal distance.
         goal_probs = -(alpha * goal_distances**beta + PROB_EPS)
@@ -134,8 +157,6 @@ def calculate_goal_probs(
         # Option 4: exponential of inverse of goal distance. This requires handling NaNs
         goal_probs = np.exp(1 / (alpha * goal_distances**beta + 1))
         goal_probs = np.where(np.isnan(goal_probs), 0, PROB_EPS)
-    else:
-        raise ValueError(f"Invalid goal_probs_method: {goal_probs_method}")
 
     # Normalize the goal probabilities.
     goal_probs_sum = goal_probs.sum()
@@ -158,8 +179,6 @@ def maybe_load_generated_goals(
     if os.path.exists(goals_path):
         with open(goals_path, "rb") as f:
             goals = pickle.load(f)
-        # TODO: replace with logger.info call.
-        print(f"Loaded generated goals from {goals_path}.")
         return cast(List[MinecraftBlocks], goals)
     else:
         return None
@@ -169,21 +188,29 @@ class GoalPredictorConfig(TypedDict):
     normalize_goal_distance: bool
     """Whether to normalize the goal distance by the number of blocks that are being
     compared."""
+
     use_raw_goal_distance: bool
     """Whether to use the raw goal distance (number of blocks that are different from
     the current state) without considering which blocks have been interacted with."""
+
     predict_entire_world: bool
     """Whether to predict the entire world or only the goal volume."""
+
     goal_probs_method: GoalProbsMethod
     """Method of computing goal probabilities from goal distances."""
+
     alpha: float
     """Alpha parameter for the goal probabilities method. See calculate_goal_probs."""
+
     beta: float
     """Beta parameter for the goal probabilities method. See calculate_goal_probs."""
+
     expect_true_goal_is_generated: bool
     """Whether to expect that the true goal has been generated by the goal generator."""
+
     ignore_own_actions: bool
     """Whether to ignore the agent's own actions when calculating the goal distance."""
+
     use_num_actions_for_goal_distance: bool
     """Whether to use the number of place/break block actions needed to reach to goal as
     the goal distance. If True, 1 is added to the goal distance for each block that is
@@ -210,11 +237,16 @@ class OracleGoalPredictor:
         goal_generator_config: GoalGeneratorConfig,
         world_size: WorldSize,
         goal_size: WorldSize,
+        force_generate_goals: bool = False,
     ) -> None:
         self.goal_generator = TransformedGoalGenerator(goal_generator_config)
-        maybe_goals = maybe_load_generated_goals(
-            goal_generator_config["goal_generator_config"]["data_dir"],
-            goal_generator_config["goal_generator_config"]["subset"],
+        maybe_goals = (
+            maybe_load_generated_goals(
+                goal_generator_config["goal_generator_config"]["data_dir"],
+                goal_generator_config["goal_generator_config"]["subset"],
+            )
+            if not force_generate_goals
+            else None
         )
         self.goals = (
             maybe_goals if maybe_goals is not None else self._generate_goals(goal_size)
@@ -224,6 +256,12 @@ class OracleGoalPredictor:
         self.goal_size = goal_size
 
     def _generate_goals(self, goal_size) -> List[MinecraftBlocks]:
+        """Generate the goals using the goal generator.
+
+        NOTE: This method will keep trying to generate goals until there are no more
+        houses left in the goal generator. If "repeat" is set to True in the goal
+        generator config, this may result in an infinite loop.
+        """
         craftassist_goal_generator = self.goal_generator.base_goal_generator
         if not isinstance(craftassist_goal_generator, CraftAssistGoalGenerator):
             raise ValueError(
@@ -248,7 +286,6 @@ class OracleGoalPredictor:
 
         return goals
 
-    # TODO: remove debugging code (cross-entropy calculation, true_goal_blocks, raw_distances_goal_to_true_goal).
     def predict_goal(
         self,
         obs: MbagObs,
@@ -262,7 +299,21 @@ class OracleGoalPredictor:
         ignore_own_actions: bool,
         use_num_actions_for_goal_distance: bool,
     ) -> Tuple[np.ndarray, float]:
-        """Predicts the goal logits from the current observation and goals.
+        """Predict the goal logits from the current observation and goals.
+
+        Steps:
+        1. Calculate the goal distances from the current state to each goal. The goal
+            distance depends on the number of blocks that are different from the goal.
+            Only blocks that have been interacted with are considered. If
+            ignore_own_actions is True, only blocks that were last interacted by the
+            other player are considered.
+        2. Compute the goal probabilities from the goal distances using
+            goal_probs_method.
+        3. Set the goal block probabilities to a weighted sum of the goals according to
+            the goal probabilities.
+        4. Calculate the goal logits (log of the goal block probabilities).
+
+        See GoalPredictorConfig for a description of the arguments.
 
         Returns:
             Tuple (goal_logits, cross_entropy) containing the goal logits array with
@@ -281,7 +332,8 @@ class OracleGoalPredictor:
             slice(1, 1 + self.goal_size[2]),
         )
 
-        # Get the true goal blocks.
+        # Get the true goal blocks. Only used for computing the cross-entropy and sanity
+        # checks.
         world_obs = obs[0]
         true_goal_blocks = world_obs[GOAL_BLOCKS]
         if not predict_entire_world:
@@ -298,11 +350,14 @@ class OracleGoalPredictor:
             current_blocks = current_blocks[goal_slice]
             interacted_mask = interacted_mask[goal_slice]
 
+        # For each goal, contains the closest transformed version of the goal to the
+        # current state.
         closest_transformed_goals = []
         goal_distances = []
         # Raw distances from the candidate goals to the current state.
         raw_goal_distances = []
-        # Raw distances from the candidate goals to the true goal. Only needed for debugging.
+        # Raw distances from the candidate goals to the true goal.
+        # Only needed as a sanity check.
         raw_distances_goal_to_true_goal = []
 
         for goal in self.goals:
@@ -312,8 +367,8 @@ class OracleGoalPredictor:
             transformed_goals = [
                 add_grass(padded_goal, "surround") for padded_goal in padded_goals
             ]
-            # Place the goals in the world (if needed).
             if predict_entire_world:
+                # Place the goals in the world.
                 transformed_goals = [
                     place_goal_in_world(transformed_goal, world_size=self.world_size)
                     for transformed_goal in transformed_goals
@@ -356,19 +411,19 @@ class OracleGoalPredictor:
                     (true_goal_blocks != transformed_goal).sum()
                 )
 
-            # Find the goal with the smallest goal distance.
-            if use_raw_goal_distance:
-                closest_goal_idx = np.argmin(transformed_raw_goal_distances)
-            else:
-                closest_goal_idx = np.argmin(transformed_goal_distances)
+            # Find the transformed goal with the smallest goal distance.
+            closest_goal_idx = (
+                np.argmin(transformed_raw_goal_distances)
+                if use_raw_goal_distance
+                else np.argmin(transformed_goal_distances)
+            )
             closest_transformed_goal = transformed_goals[closest_goal_idx]
             closest_goal_distance = transformed_goal_distances[closest_goal_idx]
             # Raw goal distance to the closest goal according to the goal distance, which
             # takes into account only blocks that have been interacted with.
             closest_raw_goal_distance = transformed_raw_goal_distances[closest_goal_idx]
 
-            # Optionally normalize the goal distance by the number of placeable blocks
-            # in the goal.
+            # Optionally normalize the goal distance by the number of blocks considered.
             if normalize_goal_distance:
                 num_blocks_considered = interacted_mask.sum()
                 if num_blocks_considered > 0:
@@ -392,7 +447,8 @@ class OracleGoalPredictor:
             beta=beta,
         )
 
-        # Set the goal block probabilities according to the probabilities of the goals.
+        # Set the goal block probabilities to the weighted sum of the goals according to
+        # the goal probabilities.
         goal_blocks_probs = np.zeros(goal_pred_shape)
         for goal, prob in zip(closest_transformed_goals, goal_probs):
             goal_blocks_probs[
@@ -418,7 +474,7 @@ class OracleGoalPredictor:
         # If the true goal is expected to have been generated, check that the distance
         # from the closest goal to the true goal is 0.
         if expect_true_goal_is_generated:
-            # Find the true goal index.
+            # Find the index of the candidate goal with the smallest raw goal distance.
             min_raw_distances_goal_to_true_goal = np.array(
                 [min(x) for x in raw_distances_goal_to_true_goal]
             )
@@ -428,8 +484,7 @@ class OracleGoalPredictor:
                 f"{min_raw_distances_goal_to_true_goal[true_goal_idx]}."
             )
 
-        # Compute the cross-entropy between the true goal and the goal block
-        # probabilities.
+        # Compute the cross-entropy between the true goal and the goal logits.
         flat_goal_logits = goal_logits.reshape(-1, goal_logits.shape[-1])
         flat_true_goal_blocks = true_goal_blocks.reshape(-1)
         cross_entropy = torch.nn.functional.cross_entropy(
@@ -444,11 +499,21 @@ class OracleGoalPredictor:
 
 
 class OracleGoalPredictionAgent(MbagAgent):
+    """An agent that greedily maximizes the reward based on the oracle goal predictor."""
+
     def __init__(
         self,
         agent_config: Any,
         env_config: MbagConfigDict,
     ) -> None:
+        """Initialize the agent.
+
+        Args:
+            agent_config: Configuration for the agent. Required key: "player_index".
+                Optional keys: "line_of_sight_masking" and all the keys in
+                GoalPredictorConfig.
+            env_config: Configuration for the environment.
+        """
         super().__init__(agent_config, env_config)
 
         world_size = env_config.get("world_size")
@@ -477,18 +542,26 @@ class OracleGoalPredictionAgent(MbagAgent):
         self.env = create_mbag_env_model(copy.deepcopy(env_config), self.player_index)
 
         self.goal_predictor_config = DEFAULT_ORACLE_GOAL_PREDICTOR_CONFIG.copy()
-        # Update the default config.
+        # Update the default config with the agent_config.
         for key in self.goal_predictor_config:
             if key in agent_config:
                 self.goal_predictor_config[key] = agent_config[key]
 
     def get_action_distribution(self, obs: MbagObs) -> np.ndarray:
+        """Get the action distribution based on the oracle goal predictor.
+
+        Computes the expected goal-dependent reward for each valid action based on the
+        goal logits predicted by the oracle goal predictor. The action distribution is
+        uniformly distributed across actions with the maximum reward. If there are no
+        actions that achieve a positive reward, this will typically produce a uniform
+        distribution over no-op and move actions (depending on how the goal-dependent
+        reward is computed).
+        """
         goal_logits, cross_entropy = self.goal_predictor.predict_goal(
             obs, **self.goal_predictor_config
         )
 
         world_obs, inventory_obs, timestep = obs
-        # (NUM_CHANNELS, width * height * depth)
         action_mask_flat = MbagActionDistribution.get_mask_flat(
             self.env_config,
             (world_obs[None], inventory_obs[None], timestep[None]),
@@ -507,7 +580,7 @@ class OracleGoalPredictionAgent(MbagAgent):
                 action_tuple,
                 self.world_size,
             )
-            reward = self._get_predicted_goal_dependent_reward(
+            reward = self.env._get_predicted_goal_dependent_reward(
                 obs,
                 action,
                 goal_logits,
@@ -515,9 +588,8 @@ class OracleGoalPredictionAgent(MbagAgent):
             )
             rewards.append(reward)
 
-        rewards = np.array(rewards)
         # Get indices of actions with maximum reward.
-        argmax_rewards = rewards >= rewards.max()
+        argmax_rewards = np.array(rewards) >= max(rewards)
         for valid_action_index in np.nonzero(argmax_rewards)[0]:
             # Get the corresponding action tuple.
             action_type, block_location_index, block_id = action_tuples[
@@ -525,11 +597,11 @@ class OracleGoalPredictionAgent(MbagAgent):
             ]
             # Convert the block location index to x, y, z coordinates.
             x, y, z = np.unravel_index(block_location_index, self.world_size)
-            # Add probability mass to the action type at the x, y, z location. The channel
-            # corresponding to the action type is a slice if the action type has a block_id
-            # (e.g., place_block, give_block) and a single channel otherwise (e.g., move).
-            # If it is a channel, first index into the correct block_id channel. Then, index
-            # into the x, y, z location.
+            # Add probability mass to the action type at the x, y, z location. The
+            # channel corresponding to the action type is a slice if the action type has
+            # a block_id (e.g., place_block, give_block) and a single channel otherwise
+            # (e.g., move). If it is a channel, first index into the correct block_id
+            # channel. Then, index into the x, y, z location.
             channel = MbagActionDistribution.ACTION_TYPE2CHANNEL[action_type]
             if isinstance(channel, slice):
                 action_dist[channel][block_id, x, y, z] = 1
@@ -538,75 +610,3 @@ class OracleGoalPredictionAgent(MbagAgent):
 
         action_dist /= action_dist.sum()
         return action_dist
-
-    # TODO: this is mostly copied from mbag/rllib/alpha_zero/planning.py:MbagAgent. Maybe consolidate.
-    def _get_predicted_goal_dependent_reward(
-        self,
-        obs: MbagObs,
-        action: MbagAction,
-        goal_logits: np.ndarray,
-        player_index: Optional[int] = None,
-    ) -> float:
-        """
-        Given the predicted distribution over goal blocks for each location as a logit
-        array of shape (NUM_BLOCKS, width, height, depth), this gives
-        the expected goal-dependent reward for an action.
-
-        Similarly to get_all_rewards, the rewards returned here are only valid if the
-        action is not effectively a no-op.
-        """
-        if player_index is None:
-            player_index = self.player_index
-
-        world_obs, _, _ = obs
-        env = unwrap_mbag_env(self.env)
-
-        reward = 0.0
-
-        if (
-            not self.env_config["abilities"]["inf_blocks"]
-            and action.action_type == MbagAction.BREAK_BLOCK
-            and action.block_location[0] == env.palette_x
-        ):
-            # Breaking a palette block gives no reward.
-            pass
-        elif (
-            action.action_type == MbagAction.PLACE_BLOCK
-            or action.action_type == MbagAction.BREAK_BLOCK
-        ):
-            prev_block = (
-                world_obs[CURRENT_BLOCKS][action.block_location],
-                world_obs[CURRENT_BLOCK_STATES][action.block_location],
-            )
-            new_block_id = (
-                action.block_id
-                if action.action_type == MbagAction.PLACE_BLOCK
-                else MinecraftBlocks.AIR
-            )
-            new_block = np.array(new_block_id), np.array(0)
-            goal_block_ids = np.arange(MinecraftBlocks.NUM_BLOCKS, dtype=np.uint8)
-            goal_blocks = goal_block_ids, np.zeros_like(goal_block_ids)
-
-            goal_block_id_dist = np.exp(
-                goal_logits[(slice(None),) + action.block_location]
-            )
-            goal_block_id_dist /= goal_block_id_dist.sum()
-
-            prev_similarity = env._get_goal_similarity(
-                prev_block, goal_blocks, partial_credit=True, player_index=player_index
-            )
-            new_similarity = env._get_goal_similarity(
-                new_block, goal_blocks, partial_credit=True, player_index=player_index
-            )
-            reward = float(
-                np.sum((new_similarity - prev_similarity) * goal_block_id_dist)
-            )
-
-            correct = new_similarity > prev_similarity
-            reward += env._get_reward(
-                player_index,
-                "incorrect_action",
-                env.global_timestep,
-            ) * float(np.sum(~correct * goal_block_id_dist))
-
-        return reward
