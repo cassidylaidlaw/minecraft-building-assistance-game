@@ -91,6 +91,10 @@ def sacred_config():
     if out_dir is None:
         raise ValueError("out_dir must be set if no checkpoints are provided")
 
+    # Extra args that are ignored here but used in some of the named configs.
+    goal_data_dir = None  # noqa: F841
+    repeat_goal = False  # noqa: F841
+
     observer = FileStorageObserver(out_dir)
     ex.observers.append(observer)
 
@@ -107,7 +111,7 @@ def human_alone():
     checkpoints = [assistant_checkpoint]  # noqa: F841
     policy_ids = [None]  # noqa: F841
     num_episodes = 1  # noqa: F841
-    algorithm_config_updates: List[dict] = [{}]  # noqa: F841
+    algorithm_config_updates = [{}]  # type: ignore # noqa: F841
     env_config_updates = {  # noqa: F841
         "goal_generator_config": {
             "goal_generator_config": {
