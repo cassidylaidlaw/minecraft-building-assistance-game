@@ -1,3 +1,4 @@
+import copy
 import os
 import pickle
 from typing import Any, List, Optional
@@ -471,7 +472,9 @@ class OracleGoalPredictionAgent(MbagAgent):
         self.goal_predictor = OracleGoalPredictor(
             goal_generator_config, self.world_size, goal_size
         )
-        self.env = create_mbag_env_model(env_config, self.player_index)
+        # Use a deep copy of the environment config because creating the environment
+        # model modifies the config.
+        self.env = create_mbag_env_model(copy.deepcopy(env_config), self.player_index)
 
         self.goal_predictor_config = DEFAULT_ORACLE_GOAL_PREDICTOR_CONFIG.copy()
         # Update the default config.
