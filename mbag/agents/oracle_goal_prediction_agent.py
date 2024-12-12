@@ -1,13 +1,11 @@
 import copy
 import os
 import pickle
-from typing import Any, List, Optional, get_args
+from typing import Any, List, Literal, Optional, Tuple, TypedDict, cast, get_args
 
 import numpy as np
 import torch
 import tqdm
-from mbag.environment.mbag_env import MbagConfigDict
-from typing import Literal, Tuple, cast, TypedDict
 
 from mbag.agents.action_distributions import MbagActionDistribution
 from mbag.agents.mbag_agent import MbagAgent
@@ -19,20 +17,20 @@ from mbag.environment.goals.craftassist import (
 )
 from mbag.environment.goals.goal_generator import GoalGeneratorConfig
 from mbag.environment.goals.goal_transform import TransformedGoalGenerator
+from mbag.environment.goals.transforms import AddGrassMode
+from mbag.environment.mbag_env import MbagConfigDict
 from mbag.environment.types import (
     CURRENT_BLOCK_STATES,
     CURRENT_BLOCKS,
+    CURRENT_PLAYER,
     GOAL_BLOCKS,
     LAST_INTERACTED,
-    CURRENT_PLAYER,
     OTHER_PLAYER,
     MbagObs,
     WorldSize,
 )
-from mbag.environment.goals.transforms import AddGrassMode
 from mbag.rllib.alpha_zero.planning import create_mbag_env_model
 from mbag.rllib.rllib_env import unwrap_mbag_env
-
 
 # Small value to add to the goal probabilities to avoid division by zero.
 PROB_EPS = 1e-6

@@ -13,16 +13,17 @@ from mbag.agents.oracle_goal_prediction_agent import (
     OracleGoalPredictor,
     get_goal_size_from_world_size,
 )
+from mbag.environment.blocks import MinecraftBlocks
+from mbag.environment.goals.craftassist import (
+    DEFAULT_CONFIG as CRAFTASSIST_DEFAULT_CONFIG,
+)
 from mbag.environment.goals.craftassist import (
     CraftAssistGoalGenerator,
-    DEFAULT_CONFIG as CRAFTASSIST_DEFAULT_CONFIG,
     NoRemainingHouseError,
 )
 from mbag.environment.goals.goal_transform import TransformedGoalGenerator
-from mbag.environment.blocks import MinecraftBlocks
 from mbag.environment.types import WorldSize
 from mbag.rllib.sacred_utils import NoTypeAnnotationsFileStorageObserver
-
 
 ex = Experiment("oracle_goal_predictor")
 
