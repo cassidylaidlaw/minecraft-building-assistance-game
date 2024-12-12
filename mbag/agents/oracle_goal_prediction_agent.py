@@ -20,7 +20,6 @@ from mbag.environment.goals.goal_transform import TransformedGoalGenerator
 from mbag.environment.goals.transforms import AddGrassMode
 from mbag.environment.mbag_env import MbagConfigDict
 from mbag.environment.types import (
-    CURRENT_BLOCK_STATES,
     CURRENT_BLOCKS,
     CURRENT_PLAYER,
     GOAL_BLOCKS,
@@ -30,7 +29,6 @@ from mbag.environment.types import (
     WorldSize,
 )
 from mbag.rllib.alpha_zero.planning import create_mbag_env_model
-from mbag.rllib.rllib_env import unwrap_mbag_env
 
 # Small value to add to the goal probabilities to avoid division by zero.
 PROB_EPS = 1e-6

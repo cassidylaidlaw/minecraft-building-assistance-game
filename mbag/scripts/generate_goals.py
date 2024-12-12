@@ -4,24 +4,17 @@ import os
 import pathlib
 import pickle
 from logging import Logger
-from typing import Dict, List
+from typing import Dict
 
-import tqdm
 from sacred import Experiment
 
 from mbag.agents.oracle_goal_prediction_agent import (
     OracleGoalPredictor,
     get_goal_size_from_world_size,
 )
-from mbag.environment.blocks import MinecraftBlocks
 from mbag.environment.goals.craftassist import (
     DEFAULT_CONFIG as CRAFTASSIST_DEFAULT_CONFIG,
 )
-from mbag.environment.goals.craftassist import (
-    CraftAssistGoalGenerator,
-    NoRemainingHouseError,
-)
-from mbag.environment.goals.goal_transform import TransformedGoalGenerator
 from mbag.environment.types import WorldSize
 from mbag.rllib.sacred_utils import NoTypeAnnotationsFileStorageObserver
 
@@ -42,7 +35,7 @@ def sacred_config() -> None:
     out_data_dir = data_dir
     out_dir = os.path.join(out_data_dir, f"houses/{subset}/blocks")
 
-    goal_generator_config = {
+    goal_generator_config = {  # noqa: F841
         "goal_generator": "craftassist",
         "goal_generator_config": {
             "data_dir": data_dir,
