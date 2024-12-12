@@ -167,6 +167,7 @@ DEFAULT_ORACLE_GOAL_PREDICTOR_CONFIG = dict(
     beta=1,
     expect_true_goal_is_generated=True,
     ignore_own_actions=False,
+    use_num_actions_for_goal_distance=False,
 )
 
 
@@ -225,6 +226,7 @@ class OracleGoalPredictor:
         beta: float = 1,
         expect_true_goal_is_generated: bool = True,
         ignore_own_actions: bool = False,
+        use_num_actions_for_goal_distance: bool = False,
     ) -> Tuple[np.ndarray, float, List[float], List[float], List[float]]:
         """Predicts the goal logits from the current observation and goals.
 
@@ -250,8 +252,7 @@ class OracleGoalPredictor:
             true_goal_blocks = true_goal_blocks[goal_slice]
 
         current_blocks = world_obs[CURRENT_BLOCKS]
-        # Mask for blocks that have been interacted with, not considering the
-        # bottom bedrock layer.
+        # Mask for blocks that have been interacted with.
         interacted_mask = world_obs[LAST_INTERACTED] == OTHER_PLAYER
         if not ignore_own_actions:
             interacted_mask |= world_obs[LAST_INTERACTED] == CURRENT_PLAYER
@@ -287,7 +288,22 @@ class OracleGoalPredictor:
 
             for transformed_goal in transformed_goals:
                 # Mask for current blocks that are different from the goal.
-                goal_distance_array = current_blocks != transformed_goal
+                wrong_block_mask = current_blocks != transformed_goal
+                # Mask for current blocks that are different from the goal and are not
+                # air (neither in the current state nor the goal).
+                wrong_non_air_block_mask = (
+                    wrong_block_mask
+                    & (current_blocks != MinecraftBlocks.AIR)
+                    & (transformed_goal != MinecraftBlocks.AIR)
+                )
+                # The goal distance is the number of blocks that are different from the
+                # goal.
+                goal_distance_array = wrong_block_mask.astype(int)
+                if use_num_actions_for_goal_distance:
+                    # If neither the current block nor the goal block is air, add 1 to
+                    # the goal distance because the current block must be broken and a
+                    # new block must be placed.
+                    goal_distance_array += wrong_non_air_block_mask.astype(int)
                 # Raw goal distance is the number of blocks that are different from the
                 # goal.
                 raw_goal_distance = goal_distance_array.sum()
@@ -410,6 +426,7 @@ def predict_goal_for_episode(
     beta: float = 1,
     expect_true_goal_is_generated: bool = True,
     ignore_own_actions: bool = False,
+    use_num_actions_for_goal_distance: bool = False,
 ) -> Tuple[List[int], np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     cross_entropy_per_step = []
     goal_probs_per_step = []
@@ -442,6 +459,7 @@ def predict_goal_for_episode(
             beta=beta,
             expect_true_goal_is_generated=expect_true_goal_is_generated,
             ignore_own_actions=ignore_own_actions,
+            use_num_actions_for_goal_distance=use_num_actions_for_goal_distance,
         )
         goal_probs_per_step.append(goal_blocks_probs)
         cross_entropy_per_step.append(cross_entropy)
@@ -522,6 +540,9 @@ def sacred_config() -> None:
     # Ignore the actions of the player whose perspective is being used to predict the
     # goal.
     ignore_own_actions = False  # noqa: F841
+    # If True, the number of actions needed to reach the goal is used for the goal
+    # distance.
+    use_num_actions_for_goal_distance = False  # noqa: F841
 
     out_dir = os.path.join(
         episodes_eval_dir,
@@ -560,6 +581,7 @@ def main(
     beta: float,
     expect_true_goal_is_generated: bool,
     ignore_own_actions: bool,
+    use_num_actions_for_goal_distance: bool,
     observer: NoTypeAnnotationsFileStorageObserver,
     _log: Logger,
 ) -> None:
@@ -628,6 +650,7 @@ def main(
             beta=beta,
             expect_true_goal_is_generated=expect_true_goal_is_generated,
             ignore_own_actions=ignore_own_actions,
+            use_num_actions_for_goal_distance=use_num_actions_for_goal_distance,
         )
         episode_rows = [
             {
@@ -641,6 +664,7 @@ def main(
                 "beta": beta,
                 "expect_true_goal_is_generated": expect_true_goal_is_generated,
                 "ignore_own_actions": ignore_own_actions,
+                "use_num_actions_for_goal_distance": use_num_actions_for_goal_distance,
                 "cross_entropy": cross_entropy_per_step[i],
                 "goal_probs": goal_probs_per_step[i],
                 # "goal_distances": goal_distances_per_step[i],
