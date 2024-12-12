@@ -541,7 +541,7 @@ class OracleGoalPredictionAgent(MbagAgent):
         # Update the default config with the agent_config.
         for key in self.goal_predictor_config:
             if key in agent_config:
-                self.goal_predictor_config[key] = agent_config[key]
+                self.goal_predictor_config[key] = agent_config[key]  # type: ignore[literal-required]
 
     def get_action_distribution(self, obs: MbagObs) -> np.ndarray:
         """Get the action distribution based on the oracle goal predictor.
