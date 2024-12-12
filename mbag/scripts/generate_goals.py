@@ -1,14 +1,21 @@
+"""Generate goals for the oracle goal predictor."""
+
 import os
 import pathlib
 import pickle
 from logging import Logger
-from typing import List
+from typing import Dict, List
 
 import tqdm
 from sacred import Experiment
 
+from mbag.agents.oracle_goal_prediction_agent import (
+    OracleGoalPredictor,
+    get_goal_size_from_world_size,
+)
 from mbag.environment.goals.craftassist import (
     CraftAssistGoalGenerator,
+    DEFAULT_CONFIG as CRAFTASSIST_DEFAULT_CONFIG,
     NoRemainingHouseError,
 )
 from mbag.environment.goals.goal_transform import TransformedGoalGenerator
@@ -20,9 +27,20 @@ from mbag.rllib.sacred_utils import NoTypeAnnotationsFileStorageObserver
 ex = Experiment("oracle_goal_predictor")
 
 
-def generate_goals(
-    data_dir: str, subset: str, repeat: bool, world_size: WorldSize
-) -> List[MinecraftBlocks]:
+@ex.config
+def sacred_config() -> None:
+    data_dir = CRAFTASSIST_DEFAULT_CONFIG["data_dir"]
+    subset = CRAFTASSIST_DEFAULT_CONFIG["subset"]
+    repeat = False  # noqa: F841
+
+    world_width = 11  # noqa: F841
+    world_height = 10  # noqa: F841
+    world_depth = 10  # noqa: F841
+    world_size = (world_width, world_height, world_depth)  # noqa: F841
+
+    out_data_dir = data_dir
+    out_dir = os.path.join(out_data_dir, f"houses/{subset}/blocks")
+
     goal_generator_config = {
         "goal_generator": "craftassist",
         "goal_generator_config": {
@@ -56,70 +74,21 @@ def generate_goals(
         ],
     }
 
-    goal_generator = TransformedGoalGenerator(goal_generator_config)
-
-    world_width, world_height, world_depth = world_size
-    # The goal width and depth are smaller than the world by 2 to allow players to move
-    # around the goal. The goal height is smaller by 2 because the bottom layer is
-    # bedrock and the top layer must be air to allow players to stand on the goal.
-    goal_size = (
-        world_width - 2,
-        world_height - 2,
-        world_depth - 2,
-    )
-
-    goals = []
-
-    craftassist_goal_generator: CraftAssistGoalGenerator = (
-        goal_generator.base_goal_generator
-    )
-    num_remaining_houses = len(craftassist_goal_generator.house_ids)
-    with tqdm.tqdm(total=len(craftassist_goal_generator.house_ids)) as pbar:
-        while True:
-            try:
-                goal = goal_generator.generate_goal(goal_size)
-                new_num_remaining_houses = len(
-                    craftassist_goal_generator.remaining_house_ids
-                )
-                pbar.update(num_remaining_houses - new_num_remaining_houses)
-                num_remaining_houses = new_num_remaining_houses
-                goals.append(goal)
-            except NoRemainingHouseError:
-                break
-
-    return goals
-
-
-@ex.config
-def sacred_config() -> None:
-    data_dir = "/nas/ucb/cassidy/minecraft-building-assistance-game/data/craftassist"
-    subset = "small200"
-    repeat = False  # noqa: F841
-
-    world_width = 11  # noqa: F841
-    world_height = 10  # noqa: F841
-    world_depth = 10  # noqa: F841
-
-    out_data_dir = data_dir
-    out_dir = os.path.join(out_data_dir, f"houses/{subset}/blocks")
-
     observer = NoTypeAnnotationsFileStorageObserver(out_dir)
     ex.observers.append(observer)
 
 
 @ex.automain
 def main(
-    data_dir: str,
-    subset: str,
-    repeat: bool,
-    world_width: int,
-    world_height: int,
-    world_depth: int,
+    goal_generator_config: Dict,
+    world_size: WorldSize,
     out_dir: str,
     _log: Logger,
 ) -> None:
-    world_size = (world_width, world_height, world_depth)
-    goals = generate_goals(data_dir, subset, repeat, world_size)
+    goal_size = get_goal_size_from_world_size(world_size)
+    goal_predictor = OracleGoalPredictor(
+        goal_generator_config, world_size, goal_size, force_generate_goals=True
+    )
 
     out_dir_path = pathlib.Path(out_dir)
     if not out_dir_path.exists():
@@ -127,6 +96,6 @@ def main(
     save_path = out_dir_path / "goals.pkl"
 
     with open(save_path, "wb") as f:
-        pickle.dump(goals, f)
+        pickle.dump(goal_predictor.goals, f)
 
-    _log.info(f"Saved {len(goals)} goals to {save_path}")
+    _log.info(f"Saved {len(goal_predictor.goals)} goals to {save_path}")
