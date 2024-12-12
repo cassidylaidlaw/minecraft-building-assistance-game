@@ -16,6 +16,7 @@ dependencies = [
     "types-PyYAML==5.4.3",
     "gymnasium>=0.28",
     "scikit-image>=0.21",
+    "tqdm",
 ]
 requires-python = ">= 3.8"
 classifiers=[

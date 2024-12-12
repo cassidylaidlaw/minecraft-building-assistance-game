@@ -1,6 +1,5 @@
 import contextlib
 import copy
-import warnings
 from abc import ABC, abstractmethod
 from typing import (
     Any,
@@ -10,6 +9,7 @@ from typing import (
     List,
     Mapping,
     Optional,
+    Sequence,
     Tuple,
     Union,
     cast,
@@ -781,11 +781,16 @@ class ResidualBlock(nn.Module):
     and ReLU.
     """
 
+    bn1: nn.Module
+    bn2: nn.Module
+
     def __init__(
         self,
         channels: int,
         filter_size: int = 3,
         use_bn: bool = True,
+        use_groupnorm: bool = False,
+        dropout: float = 0.0,
         use_skip_connection: bool = True,
     ):
         super().__init__()
@@ -797,7 +802,6 @@ class ResidualBlock(nn.Module):
             stride=1,
             padding=(filter_size - 1) // 2,
         )
-        self.bn1 = nn.BatchNorm3d(channels) if use_bn else nn.Identity()
         self.relu1 = nn.ReLU()
 
         self.conv2 = nn.Conv3d(
@@ -807,13 +811,26 @@ class ResidualBlock(nn.Module):
             stride=1,
             padding=(filter_size - 1) // 2,
         )
-        self.bn2 = nn.BatchNorm3d(channels) if use_bn else nn.Identity()
         self.relu2 = nn.ReLU()
+
+        if use_bn:
+            assert not use_groupnorm
+            self.bn1 = nn.BatchNorm3d(channels)
+            self.bn2 = nn.BatchNorm3d(channels)
+        elif use_groupnorm:
+            self.bn1 = nn.GroupNorm(16, channels)
+            self.bn2 = nn.GroupNorm(16, channels)
+        else:
+            self.bn1 = nn.Identity()
+            self.bn2 = nn.Identity()
+
+        self.dropout = nn.Dropout3d(dropout)
 
         self.use_skip_connection = use_skip_connection
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out: torch.Tensor = self.relu1(self.bn1(self.conv1(x)))
+        out = self.dropout(out)
         out = self.bn2(self.conv2(out))
         if self.use_skip_connection:
             out = out + x
@@ -939,10 +956,14 @@ class MbagConvolutionalModelConfig(MbagModelConfig, total=False):
     use_resnet: bool
     filter_size: int
     hidden_channels: int
+    use_groupnorm: bool
+    dropout: float
     num_unet_layers: int
     """Number of layers to include in a UNet3d, if any."""
     unet_grow_factor: float
     unet_use_bn: bool
+    interleave_lstm_every: int
+    lstm_size: Optional[int]
 
 
 CONV_DEFAULT_CONFIG: MbagConvolutionalModelConfig = {
@@ -959,9 +980,13 @@ CONV_DEFAULT_CONFIG: MbagConvolutionalModelConfig = {
     "use_resnet": False,
     "filter_size": 3,
     "hidden_channels": 32,
+    "use_groupnorm": False,
+    "dropout": 0.0,
     "num_unet_layers": 0,
     "unet_grow_factor": 2.0,
     "unet_use_bn": False,
+    "interleave_lstm_every": -1,
+    "lstm_size": None,
 }
 
 
@@ -987,20 +1012,30 @@ class MbagConvolutionalModel(MbagTorchModel):
         self.use_resnet = extra_config["use_resnet"]
         self.filter_size = extra_config["filter_size"]
         self.hidden_channels = extra_config["hidden_channels"]
+        self.use_groupnorm = extra_config["use_groupnorm"]
+        self.dropout = extra_config["dropout"]
         self.num_unet_layers = extra_config["num_unet_layers"]
         self.unet_grow_factor = extra_config["unet_grow_factor"]
         self.unet_use_bn = extra_config["unet_use_bn"]
+        self.interleave_lstm_every = extra_config["interleave_lstm_every"]
+        self.lstm_size = extra_config.get("lstm_size") or self.hidden_channels
 
         super().__init__(
             obs_space, action_space, num_outputs, model_config, name, **kwargs
         )
 
+    def get_initial_state(self):
+        if self.interleave_lstm_every > 0:
+            assert isinstance(self.backbone, InterleavedBackbone)
+            state = self.backbone.get_initial_state(world_size=self.world_size)
+            if self.use_prev_blocks:
+                state.append(self._get_prev_blocks_initial_state())
+            return state
+        else:
+            return super().get_initial_state()
+
     def _construct_backbone(self, is_value_network=False) -> nn.Module:
-        include_unet = not is_value_network
-        backbone_layers: List[nn.Module] = []
-        layer_index = 0
-        num_layers = self.num_conv_1_layers + self.num_layers
-        while layer_index < num_layers:
+        def layer_creator(layer_index: int) -> nn.Module:
             if layer_index < self.num_conv_1_layers:
                 filter_size = 1
             else:
@@ -1010,89 +1045,62 @@ class MbagConvolutionalModel(MbagTorchModel):
             else:
                 in_channels = self.hidden_channels
 
-            if (
-                self.use_resnet
-                and in_channels == self.hidden_channels
-                and layer_index + 2 < num_layers
-            ):
-                backbone_layers.append(ResidualBlock(channels=self.hidden_channels))
-                layer_index += 2
+            if self.use_resnet and in_channels == self.hidden_channels:
+                return ResidualBlock(
+                    channels=self.hidden_channels,
+                    filter_size=filter_size,
+                    use_bn=not self.use_groupnorm,
+                    use_groupnorm=self.use_groupnorm,
+                    dropout=self.dropout,
+                )
             else:
-                backbone_layers.append(
+                return nn.Sequential(
                     nn.Conv3d(
                         in_channels=in_channels,
                         out_channels=self.hidden_channels,
                         kernel_size=filter_size,
                         stride=1,
                         padding=(filter_size - 1) // 2,
-                    )
+                    ),
+                    nn.LeakyReLU(),
                 )
-                backbone_layers.append(nn.LeakyReLU())
-                layer_index += 1
-        if include_unet and self.num_unet_layers > 0:
-            self.unet = UNet3d(
-                self.world_obs_space.shape[1],
-                self.hidden_channels,
-                self.hidden_channels,
-                self.num_unet_layers,
-                grow_factor=self.unet_grow_factor,
-                use_bn=self.unet_use_bn,
+
+        if self.num_unet_layers == 0:
+            return InterleavedBackbone(
+                num_layers=self.num_layers,
+                layer_creator=layer_creator,
+                interleave_lstm_every=self.interleave_lstm_every,
+                hidden_size=self.hidden_channels,
+                lstm_size=self.lstm_size,
             )
-            backbone_layers.append(self.unet)
         else:
-            backbone_layers = backbone_layers[:-1]  # Remove last ReLU.
-        return nn.Sequential(*backbone_layers)
+            assert self.interleave_lstm_every == -1
+            include_unet = not is_value_network
+            backbone_layers: List[nn.Module] = []
+            layer_index = 0
+            num_layers = self.num_conv_1_layers + self.num_layers
+            while layer_index < num_layers:
+                backbone_layers.append(layer_creator(layer_index))
+                layer_index += 1
+            if include_unet and self.num_unet_layers > 0:
+                self.unet = UNet3d(
+                    self.world_obs_space.shape[1],
+                    self.hidden_channels,
+                    self.hidden_channels,
+                    self.num_unet_layers,
+                    grow_factor=self.unet_grow_factor,
+                    use_bn=self.unet_use_bn,
+                )
+                backbone_layers.append(self.unet)
+            else:
+                backbone_layers = backbone_layers[:-1]  # Remove last ReLU.
+            return nn.Sequential(*backbone_layers)
 
 
 ModelCatalog.register_custom_model("mbag_convolutional_model", MbagConvolutionalModel)
 
 
-class MbagRecurrentConvolutionalModelConfig(MbagConvolutionalModelConfig):
-    pass
-
-
-RECURRENT_CONV_DEFAULT_CONFIG: MbagRecurrentConvolutionalModelConfig = {
-    **CONV_DEFAULT_CONFIG,
-}
-
-
-class AddTimeDimRNN(nn.Module):
-    _rnn_state: Tuple[torch.Tensor, torch.Tensor]
-    _outputs: torch.Tensor
-    _new_state: List[torch.Tensor]
-
-    def __init__(self, rnn: nn.Module):
-        super().__init__()
-        self.rnn = rnn
-
-    def set_state_seq_lens(self, rnn_state, seq_lens):
-        if isinstance(seq_lens, np.ndarray):
-            seq_lens = torch.Tensor(seq_lens).int()
-        self._seq_lens = seq_lens
-        self._rnn_state = rnn_state
-
-    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        max_seq_len = inputs.shape[0] // self._seq_lens.shape[0]
-        input_shape = inputs.size()[1:]
-        inputs = inputs.reshape(-1, max_seq_len, *input_shape)
-        outputs, new_state = self.rnn(
-            inputs,
-            [self._rnn_state[0].unsqueeze(0), self._rnn_state[1].unsqueeze(0)],
-        )
-        self._outputs = outputs.reshape(-1, *input_shape)
-        self._new_state = [new_state[0].squeeze(0), new_state[1].squeeze(0)]
-        return self._outputs
-
-    def get_outputs(self) -> torch.Tensor:
-        return self._outputs
-
-    def get_new_state(self):
-        return self._new_state
-
-
-class MbagRecurrentConvolutionalModel(MbagModel, nn.Module):
-    _logits: torch.Tensor
-
+class OtherAgentActionPredictorMixin(MbagTorchModel):
     def __init__(
         self,
         obs_space: spaces.Space,
@@ -1102,89 +1110,31 @@ class MbagRecurrentConvolutionalModel(MbagModel, nn.Module):
         name,
         **kwargs,
     ):
-        nn.Module.__init__(self)
-        super().__init__(obs_space, action_space, num_outputs, model_config, name)
-
-        extra_config = RECURRENT_CONV_DEFAULT_CONFIG
-        extra_config.update(kwargs)  # type: ignore
-
-        self.conv_model = MbagConvolutionalModel(
-            obs_space,
-            action_space,
-            num_outputs,
-            model_config,
-            name=f"{name}.conv_model",
-            **extra_config,
+        super().__init__(
+            obs_space, action_space, num_outputs, model_config, name, **kwargs
         )
-        assert hasattr(self.conv_model, "unet")
-        unet: UNet3d = self.conv_model.unet
-        self.rnn_hidden_dim = unet.fc_layer_size
 
-        self.lstm = nn.LSTM(self.rnn_hidden_dim, self.rnn_hidden_dim, batch_first=True)
-        self.rnn = AddTimeDimRNN(self.lstm)
-        unet.set_fc_layer(self.rnn)
+        self.other_agent_action_prediction_head = self._construct_action_head()
 
-        if self.model_config["vf_share_layers"]:
-            value_layers: List[nn.Module] = []
-            hidden_channels = extra_config["hidden_channels"]
-            for layer_index in range(extra_config["num_value_layers"]):
-                value_layers.append(
-                    nn.Linear(
-                        self.rnn_hidden_dim if layer_index == 0 else hidden_channels,
-                        hidden_channels,
-                    )
-                )
-                value_layers.append(nn.LeakyReLU())
-            self.value_head = nn.Sequential(
-                *value_layers,
-                nn.Linear(
-                    self.rnn_hidden_dim if len(value_layers) == 0 else hidden_channels,
-                    1,
-                    bias=True,
-                ),
+    def predict_other_agent_action(self) -> torch.Tensor:
+        with self._amp_or_nothing:
+            logits: torch.Tensor = self.other_agent_action_prediction_head(
+                self._backbone_out
             )
-        else:
-            warnings.warn(
-                "without vf_share_layers, the value function will not be recurrent"
-            )
+        flat_logits = MbagActionDistribution.to_flat_torch_logits(
+            self.env_config, logits
+        )
+        return flat_logits.float()
 
-    def get_initial_state(self):
-        # Place hidden states on same device as model.
-        param = next(iter(self.lstm.parameters()))
-        h = [
-            param.new(1, self.rnn_hidden_dim).zero_().squeeze(0),
-            param.new(1, self.rnn_hidden_dim).zero_().squeeze(0),
-        ]
-        return h
 
-    def value_function(self):
-        if self.model_config["vf_share_layers"]:
-            return self.value_head(self.rnn.get_outputs()).squeeze(1) * self.vf_scale
-        else:
-            return self.conv_model.value_function()
-
-    def forward(
-        self,
-        input_dict: Dict[str, TensorType],
-        state: List[TensorType],
-        seq_lens: TensorType,
-    ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
-        self.rnn.set_state_seq_lens(state, seq_lens)
-        self._logits, _ = self.conv_model.forward(input_dict, state, seq_lens)
-        new_state = self.rnn.get_new_state()
-
-        return self._logits, new_state
-
-    @property
-    def logits(self) -> torch.Tensor:
-        return self._logits
-
-    def block_id_model(self, inputs: torch.Tensor) -> torch.Tensor:
-        return self.conv_model.block_id_model(inputs)
+class MbagConvolutionalAlphaZeroModel(
+    MbagConvolutionalModel, OtherAgentActionPredictorMixin
+):
+    pass
 
 
 ModelCatalog.register_custom_model(
-    "mbag_recurrent_convolutional_model", MbagRecurrentConvolutionalModel
+    "mbag_convolutional_alphazero_model", MbagConvolutionalAlphaZeroModel
 )
 
 
@@ -1295,18 +1245,46 @@ class SeparatedTransformerEncoderLayer(nn.TransformerEncoderLayer):
         return x
 
 
+class ProjectedLSTM(nn.Module):
+    def __init__(
+        self,
+        hidden_size: int,
+        lstm_size: int,
+    ):
+        super().__init__()
+        self.down_projection = nn.Linear(hidden_size, lstm_size)
+        self.lstm = nn.LSTM(
+            input_size=lstm_size,
+            hidden_size=lstm_size,
+            num_layers=1,
+            batch_first=True,
+        )
+        self.up_projection = nn.Linear(lstm_size, hidden_size)
+
+    def forward(
+        self, x: torch.Tensor, state_in: Sequence[torch.Tensor]
+    ) -> Tuple[torch.Tensor, Sequence[torch.Tensor]]:
+        x = self.down_projection(x)
+        pre_lstm_dtype = x.dtype
+        x, state_out = self.lstm(x.float(), state_in)
+        x = self.up_projection(x.to(pre_lstm_dtype))
+        return x, state_out
+
+
 class InterleavedBackbone(nn.Module):
     def __init__(
         self,
         num_layers: int,
         layer_creator: Callable[[int], nn.Module],
         interleave_lstm_every: int = -1,
+        hidden_size: int = 64,
         lstm_size: int = 64,
         norm_first: bool = False,
     ):
         super().__init__()
 
         self.num_layers = num_layers
+        self.hidden_size = hidden_size
         self.lstm_size = lstm_size
         self.norm_first = norm_first
         self.interleave_lstm_every = interleave_lstm_every
@@ -1320,14 +1298,20 @@ class InterleavedBackbone(nn.Module):
                 self.interleave_lstm_every > 0
                 and (layer_index + 1) % self.interleave_lstm_every == 0
             ):
-                layer = nn.LSTM(
-                    input_size=self.lstm_size,
-                    hidden_size=self.lstm_size,
-                    num_layers=1,
-                    batch_first=True,
-                )
+                if self.lstm_size == self.hidden_size:
+                    layer = nn.LSTM(
+                        input_size=self.lstm_size,
+                        hidden_size=self.lstm_size,
+                        num_layers=1,
+                        batch_first=True,
+                    )
+                else:
+                    layer = ProjectedLSTM(
+                        hidden_size=self.hidden_size,
+                        lstm_size=self.lstm_size,
+                    )
                 if self.norm_first:
-                    pre_lstm_layer_norm = nn.LayerNorm(self.lstm_size)
+                    pre_lstm_layer_norm = nn.LayerNorm(self.hidden_size)
                     self.pre_lstm_layer_norms.append(pre_lstm_layer_norm)
             else:
                 # layer = nn.TransformerEncoderLayer(
@@ -1343,14 +1327,14 @@ class InterleavedBackbone(nn.Module):
             self.layers.append(layer)
 
         if self.norm_first:
-            self.post_layer_norm = nn.LayerNorm(self.lstm_size)
+            self.post_layer_norm = nn.LayerNorm(self.hidden_size)
 
     def _run_layer(
         self, layer_index: int, x: torch.Tensor, state: List[torch.Tensor], seq_lens
     ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
         layer = self.layers[layer_index]
 
-        if isinstance(layer, nn.LSTM):
+        if isinstance(layer, (nn.LSTM, ProjectedLSTM)):
             lstm_index = layer_index // self.interleave_lstm_every
             lstm_state = state[2 * lstm_index : 2 * (lstm_index + 1)]
             x, state = self._run_lstm(
@@ -1375,7 +1359,7 @@ class InterleavedBackbone(nn.Module):
 
     def _run_lstm(
         self,
-        lstm: nn.LSTM,
+        lstm: Union[nn.LSTM, ProjectedLSTM],
         x: torch.Tensor,
         state_in: List[torch.Tensor],
         seq_lens,
@@ -1396,7 +1380,7 @@ class InterleavedBackbone(nn.Module):
             *x.size()[1:],
         )
         batch_size, max_seq_len = x_with_time.size()[:2]
-        assert x_with_time.size()[2:] == (self.lstm_size,) + world_size
+        assert x_with_time.size()[2:] == (self.hidden_size,) + world_size
         # Should be of size (batch_size * width * height * depth, max_seq_len, hidden_size).
         x_per_location = x_with_time.permute(0, 3, 4, 5, 1, 2).flatten(end_dim=3)
         if pre_layer_norm:
@@ -1416,7 +1400,7 @@ class InterleavedBackbone(nn.Module):
             batch_size,
             *world_size,
             max_seq_len,
-            self.lstm_size,
+            self.hidden_size,
         ).permute(0, 4, 5, 1, 2, 3)
         state_out = [
             state.reshape(batch_size, *world_size, self.lstm_size).permute(
@@ -1629,6 +1613,7 @@ class MbagTransformerModel(MbagTorchModel):
             num_layers=self.num_layers,
             layer_creator=layer_creator,
             interleave_lstm_every=4 if self.interleave_lstm else -1,
+            hidden_size=self.hidden_size,
             lstm_size=self.hidden_size,
             norm_first=self.norm_first,
         )
@@ -1679,33 +1664,6 @@ class MbagTransformerModel(MbagTorchModel):
 
 
 ModelCatalog.register_custom_model("mbag_transformer_model", MbagTransformerModel)
-
-
-class OtherAgentActionPredictorMixin(MbagTorchModel):
-    def __init__(
-        self,
-        obs_space: spaces.Space,
-        action_space: spaces.Space,
-        num_outputs: int,
-        model_config,
-        name,
-        **kwargs,
-    ):
-        super().__init__(
-            obs_space, action_space, num_outputs, model_config, name, **kwargs
-        )
-
-        self.other_agent_action_prediction_head = self._construct_action_head()
-
-    def predict_other_agent_action(self) -> torch.Tensor:
-        with self._amp_or_nothing:
-            logits: torch.Tensor = self.other_agent_action_prediction_head(
-                self._backbone_out
-            )
-        flat_logits = MbagActionDistribution.to_flat_torch_logits(
-            self.env_config, logits
-        )
-        return flat_logits.float()
 
 
 class MbagTransformerAlphaZeroModel(

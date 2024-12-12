@@ -92,6 +92,7 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
         other_agent_action_predictor_loss_coeff=NotProvided,
         goal_loss_coeff=NotProvided,
         prev_goal_kl_coeff=NotProvided,
+        prev_goal_kl_coeff_schedule=NotProvided,
         entropy_coeff=NotProvided,
         entropy_coeff_schedule=NotProvided,
         use_critic=NotProvided,
@@ -128,6 +129,8 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
             prev_goal_kl_coeff (float): Coefficient between the KL of the previous
                 goal predictions and the current goal predictions during training
                 (encourages stability of goal predictions).
+            prev_goal_kl_coeff_schedule (float): Schedule for the previous goal KL
+                coefficient.
             entropy_coeff (float): Coefficient of the entropy loss.
             entropy_coeff_schedule (float): Schedule for the entropy
                 coefficient.
@@ -177,6 +180,8 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
             self.goal_loss_coeff = goal_loss_coeff
         if prev_goal_kl_coeff is not NotProvided:
             self.prev_goal_kl_coeff = prev_goal_kl_coeff
+        if prev_goal_kl_coeff_schedule is not NotProvided:
+            self.prev_goal_kl_coeff_schedule = prev_goal_kl_coeff_schedule
         if entropy_coeff is not NotProvided:
             self.entropy_coeff = entropy_coeff
         if entropy_coeff_schedule is not NotProvided:
@@ -573,6 +578,7 @@ class MbagAlphaZero(AlphaZero, KLRegularizationMixin):
                             policy_train_batch.as_multi_agent(),
                             model_train_batch.as_multi_agent(),
                         )
+                        del policy_train_batch, model_train_batch
                     else:
                         train_batch = policy_train_batch
                 else:

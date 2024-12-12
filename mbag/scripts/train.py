@@ -23,7 +23,6 @@ from ray.tune.registry import ENV_CREATOR, _global_registry, get_trainable_cls
 from sacred import SETTINGS as SACRED_SETTINGS
 from sacred import Experiment
 from sacred.config.custom_containers import DogmaticDict
-from typing_extensions import Literal
 
 import mbag
 from mbag.agents.heuristic_agents import ALL_HEURISTIC_AGENTS
@@ -57,7 +56,7 @@ from mbag.rllib.sacred_utils import (
     convert_dogmatics_to_standard,
 )
 from mbag.rllib.torch_models import (
-    MbagRecurrentConvolutionalModelConfig,
+    MbagConvolutionalModelConfig,
     MbagTransformerModelConfig,
 )
 from mbag.rllib.training_utils import (
@@ -363,6 +362,7 @@ def sacred_config(_log):  # noqa
     policy_loss_coeff = 1
     goal_loss_coeff = 0.5
     prev_goal_kl_coeff = 0
+    prev_goal_kl_coeff_schedule = None
     place_block_loss_coeff = 1
     place_block_loss_coeff_schedule = None
     predict_goal_using_next_state = False
@@ -373,9 +373,7 @@ def sacred_config(_log):  # noqa
     store_model_state_in_torch = False
 
     # Model
-    model: Literal["convolutional", "recurrent_convolutional", "transformer"] = (
-        "convolutional"
-    )
+    model: str = "convolutional"
     max_seq_len = horizon
     embedding_size = 16
     position_embedding_size = 48
@@ -403,11 +401,15 @@ def sacred_config(_log):  # noqa
     norm_first = False
     use_separated_transformer = False
     interleave_lstm = False
+    interleave_lstm_every = -1
+    lstm_size = hidden_size
     use_prev_blocks = False
     use_prev_action = False
     use_prev_other_agent_action = False
     assert not use_prev_other_agent_action
     use_resnet = False
+    use_groupnorm = False
+    dropout = 0.0
     num_unet_layers = 0
     unet_grow_factor = 2
     unet_use_bn = False
@@ -419,7 +421,7 @@ def sacred_config(_log):  # noqa
         "vf_share_layers": vf_share_layers,
     }
     if "convolutional" in model:
-        conv_config: MbagRecurrentConvolutionalModelConfig = {
+        conv_config: MbagConvolutionalModelConfig = {
             "env_config": cast(MbagConfigDict, dict(environment_params)),
             "num_inventory_obs": num_inventory_obs,
             "embedding_size": embedding_size,
@@ -430,11 +432,13 @@ def sacred_config(_log):  # noqa
             "num_conv_1_layers": num_conv_1_layers,
             "num_layers": num_layers,
             "use_resnet": use_resnet,
+            "use_groupnorm": use_groupnorm,
+            "dropout": dropout,
             "filter_size": filter_size,
+            "hidden_size": hidden_size,
             "hidden_channels": hidden_channels,
             "num_action_layers": num_action_layers,
             "num_value_layers": num_value_layers,
-            "num_lstm_layers": num_lstm_layers,
             "use_prev_blocks": use_prev_blocks,
             "use_prev_action": use_prev_action,
             "mask_action_distribution": mask_action_distribution,
@@ -445,6 +449,8 @@ def sacred_config(_log):  # noqa
             "unet_grow_factor": unet_grow_factor,
             "unet_use_bn": unet_use_bn,
             "num_value_layers": num_value_layers,
+            "interleave_lstm_every": interleave_lstm_every,
+            "lstm_size": lstm_size,
         }
         model_config["custom_model_config"] = conv_config
     elif "transformer" in model:
@@ -762,6 +768,9 @@ def sacred_config(_log):  # noqa
             policy_loss_coeff=policy_loss_coeff,
             vf_loss_coeff=vf_loss_coeff,
             prev_goal_kl_coeff=prev_goal_kl_coeff,
+            prev_goal_kl_coeff_schedule=convert_dogmatics_to_standard(
+                prev_goal_kl_coeff_schedule
+            ),
             entropy_coeff_schedule=convert_dogmatics_to_standard(
                 entropy_coeff_schedule
             ),

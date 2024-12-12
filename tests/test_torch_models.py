@@ -27,5 +27,5 @@ def test_separated_transformer_batch_size():
     )
     encoder.cuda()
     encoder_inputs = torch.rand((512, 4, 20, 20, 20), device="cuda")
-    encoder_outputs = encoder(encoder_inputs)
+    encoder_outputs, _ = encoder(encoder_inputs)
     assert encoder_outputs.size() == encoder_inputs.size()
