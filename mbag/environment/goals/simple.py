@@ -1,15 +1,21 @@
 import random
-from typing import List, Set, TypedDict
+from typing import List, Optional, Set, TypedDict
 
 import cc3d
 import numpy as np
 
 from ..blocks import MinecraftBlocks
 from ..types import WorldSize
-from .goal_generator import GoalGenerator
+from .goal_generator import GoalGenerator, GoalGeneratorConfig
 
 
-class BasicGoalGenerator(GoalGenerator):
+class SingleGoalGenerator(GoalGenerator):
+    """Abstract class for goal generators that only generate a single goal."""
+
+    num_remaining_goals: Optional[int] = 1
+
+
+class BasicGoalGenerator(SingleGoalGenerator):
     def generate_goal(self, size: WorldSize) -> MinecraftBlocks:
         goal = MinecraftBlocks(size)
         goal.blocks[:, :2, :] = MinecraftBlocks.NAME2ID["cobblestone"]
@@ -26,6 +32,10 @@ class SetGoalGenerator(GoalGenerator):
     """
 
     config: SetGoalGeneratorConfig
+
+    def __init__(self, config: GoalGeneratorConfig):
+        super().__init__(config)
+        self.num_remaining_goals = len(self.config["goals"])
 
     def generate_goal(self, size: WorldSize) -> MinecraftBlocks:
         width, height, depth = size
@@ -71,7 +81,7 @@ class RandomGoalGenerator(GoalGenerator):
         return goal
 
 
-class SimpleOverhangGoalGenerator(GoalGenerator):
+class SimpleOverhangGoalGenerator(SingleGoalGenerator):
     """
     Generates a structure with an overhang
     """
@@ -86,7 +96,7 @@ class SimpleOverhangGoalGenerator(GoalGenerator):
         return goal
 
 
-class TutorialGoalGenerator(GoalGenerator):
+class TutorialGoalGenerator(SingleGoalGenerator):
     """
     Generates a small house useful as a tutorial for human players.
     """

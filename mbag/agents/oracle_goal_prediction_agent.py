@@ -11,10 +11,7 @@ from mbag.agents.action_distributions import MbagActionDistribution
 from mbag.agents.mbag_agent import MbagAgent
 from mbag.environment.actions import MbagAction, MbagActionTuple
 from mbag.environment.blocks import MinecraftBlocks
-from mbag.environment.goals.craftassist import (
-    CraftAssistGoalGenerator,
-    NoRemainingHouseError,
-)
+from mbag.environment.goals.craftassist import NoRemainingHouseError
 from mbag.environment.goals.goal_generator import GoalGeneratorConfig
 from mbag.environment.goals.goal_transform import TransformedGoalGenerator
 from mbag.environment.goals.transforms import AddGrassMode
@@ -236,14 +233,23 @@ class OracleGoalPredictor:
         force_generate_goals: bool = False,
     ) -> None:
         self.goal_generator = TransformedGoalGenerator(goal_generator_config)
-        maybe_goals = (
-            maybe_load_generated_goals(
-                goal_generator_config["goal_generator_config"]["data_dir"],
-                goal_generator_config["goal_generator_config"]["subset"],
+        if self.goal_generator.num_remaining_goals is None:
+            raise ValueError(
+                "The goal generator must have a fixed number of remaining goals."
             )
-            if not force_generate_goals
-            else None
+
+        goal_generator_subconfig = goal_generator_config.get(
+            "goal_generator_config", {}
         )
+        data_dir = goal_generator_subconfig.get("data_dir")
+        subset = goal_generator_subconfig.get("subset")
+        if not force_generate_goals and data_dir is not None and subset is not None:
+            maybe_goals = maybe_load_generated_goals(
+                data_dir,
+                subset,
+            )
+        else:
+            maybe_goals = None
         self.goals = (
             maybe_goals if maybe_goals is not None else self._generate_goals(goal_size)
         )
@@ -254,28 +260,31 @@ class OracleGoalPredictor:
     def _generate_goals(self, goal_size) -> List[MinecraftBlocks]:
         """Generate the goals using the goal generator.
 
-        NOTE: This method will keep trying to generate goals until there are no more
-        houses left in the goal generator. If "repeat" is set to True in the goal
-        generator config, this may result in an infinite loop.
+        This method generates goals until there are no more houses left in the goal
+        generator or for the maximum number of goals available in the goal generator
+        upon initialization. The latter condition is necessary because the goal
+        generator may have an infinite number of goals (e.g., random goals, repeated
+        goals).
         """
-        craftassist_goal_generator = self.goal_generator.base_goal_generator
-        if not isinstance(craftassist_goal_generator, CraftAssistGoalGenerator):
-            raise ValueError(
-                "The base_goal_generator of the goal generator must be a "
-                "CraftAssistGoalGenerator to use the OracleGoalPredictor."
-            )
-
         goals = []
-        num_remaining_houses = len(craftassist_goal_generator.house_ids)
-        with tqdm.tqdm(total=len(craftassist_goal_generator.house_ids)) as pbar:
-            while True:
+        num_remaining_goals = self.goal_generator.num_remaining_goals
+        assert num_remaining_goals is not None, "num_remaining_goals must be set."
+
+        with tqdm.tqdm(total=num_remaining_goals) as pbar:
+            for _ in range(num_remaining_goals):
                 try:
                     goal = self.goal_generator.generate_goal(goal_size)
-                    new_num_remaining_houses = len(
-                        craftassist_goal_generator.remaining_house_ids
+                    new_num_remaining_goals = self.goal_generator.num_remaining_goals
+                    assert new_num_remaining_goals is not None, (
+                        "num_remaining_goals must remain set. It was initially set but "
+                        "got changed to None."
                     )
-                    pbar.update(num_remaining_houses - new_num_remaining_houses)
-                    num_remaining_houses = new_num_remaining_houses
+                    # Increment the progress bar by the number of goals
+                    # generated/skipped. The number of remaining goals may remain the
+                    # same (e.g., if the goal generator can generate an infinite number
+                    # of goals); increment by 1 in that case.
+                    pbar.update(max(1, num_remaining_goals - new_num_remaining_goals))
+                    num_remaining_goals = new_num_remaining_goals
                     goals.append(goal)
                 except NoRemainingHouseError:
                     break

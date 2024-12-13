@@ -247,7 +247,8 @@ def test_lowest_block_agent():
 
 @pytest.mark.timeout(30)
 @pytest.mark.uses_rllib
-def test_rllib_heuristic_agents():
+@pytest.mark.parametrize("heuristic_agent_id", ALL_HEURISTIC_AGENTS.keys())
+def test_rllib_heuristic_agents(heuristic_agent_id: str):
     from ray.rllib.algorithms.pg import PGConfig
     from ray.rllib.evaluate import rollout
 
@@ -258,8 +259,12 @@ def test_rllib_heuristic_agents():
             "world_size": (8, 8, 8),
             "num_players": 1,
             "horizon": 100,
-            "goal_generator": BasicGoalGenerator,
-            "goal_generator_config": {},
+            "goal_generator": TransformedGoalGenerator,
+            "goal_generator_config": {
+                "goal_generator": "basic",
+                "goal_generator_config": {},
+                "transforms": [],
+            },
             "malmo": {
                 "use_malmo": False,
                 "use_spectator": False,
@@ -268,39 +273,43 @@ def test_rllib_heuristic_agents():
         }
     )
 
-    for heuristic_agent_id, heuristic_agent_cls in ALL_HEURISTIC_AGENTS.items():
-        logger.info(f"Testing {heuristic_agent_id} agent...")
-        heuristic_agent = heuristic_agent_cls({}, env_config)
-        for env_id in ["MBAG-v1", "MBAGFlatActions-v1"]:
-            env = _global_registry.get(ENV_CREATOR, env_id)(env_config)
-            trainer = (
-                PGConfig()
-                .environment(
-                    env_id,
-                    env_config=cast(Dict[Any, Any], env_config),
-                )
-                .multi_agent(
-                    policies={
-                        "pq": PolicySpec(
-                            policy_class=MbagAgentPolicy,
-                            observation_space=env.observation_space.spaces["player_0"],
-                            action_space=env.action_space.spaces["player_0"],
-                            config={"mbag_agent": heuristic_agent},
-                        )
-                    },
-                    policy_mapping_fn=lambda agent_id, **kwargs: "pq",
-                    policies_to_train=[],
-                )
-                .framework("torch")
-                .build()
-            )
+    agent_to_agent_config = {
+        "oracle_goal_predictor": {"player_index": 0},
+    }
 
-            rollout(
-                trainer,
-                None,
-                num_steps=0,
-                num_episodes=2,
+    heuristic_agent_cls = ALL_HEURISTIC_AGENTS[heuristic_agent_id]
+    agent_config = agent_to_agent_config.get(heuristic_agent_id, {})
+    heuristic_agent = heuristic_agent_cls(agent_config, env_config)
+    for env_id in ["MBAG-v1", "MBAGFlatActions-v1"]:
+        env = _global_registry.get(ENV_CREATOR, env_id)(env_config)
+        trainer = (
+            PGConfig()
+            .environment(
+                env_id,
+                env_config=cast(Dict[Any, Any], env_config),
             )
+            .multi_agent(
+                policies={
+                    "pq": PolicySpec(
+                        policy_class=MbagAgentPolicy,
+                        observation_space=env.observation_space.spaces["player_0"],
+                        action_space=env.action_space.spaces["player_0"],
+                        config={"mbag_agent": heuristic_agent},
+                    )
+                },
+                policy_mapping_fn=lambda agent_id, **kwargs: "pq",
+                policies_to_train=[],
+            )
+            .framework("torch")
+            .build()
+        )
+
+        rollout(
+            trainer,
+            None,
+            num_steps=0,
+            num_episodes=2,
+        )
 
 
 def test_mirror_placed_blocks():

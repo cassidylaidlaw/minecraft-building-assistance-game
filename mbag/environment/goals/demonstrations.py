@@ -38,6 +38,7 @@ class DemonstrationsGoalGenerator(GoalGenerator):
         del demonstration_batch[SampleBatch.INFOS]
 
         self.demonstration_episodes = demonstration_batch.split_by_episode()
+        self.num_remaining_goals = len(self.demonstration_episodes)
 
     def generate_goal(self, size: WorldSize) -> MinecraftBlocks:
         from ray.rllib.policy.sample_batch import SampleBatch

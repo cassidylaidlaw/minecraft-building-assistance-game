@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Mapping
+from typing import Any, Mapping, Optional
 
 import numpy as np
 
@@ -12,6 +12,10 @@ GoalGeneratorConfig = Mapping[str, Any]
 class GoalGenerator(ABC):
     default_config: GoalGeneratorConfig = {}
     config: GoalGeneratorConfig
+    # Number of remaining goals that can be generated. If None, there is no limit.
+    # This number may or may not be decremented as goals are generated, depending on the
+    # implementation.
+    num_remaining_goals: Optional[int] = None
 
     def __init__(self, config: GoalGeneratorConfig):
         self.config = dict(self.default_config)

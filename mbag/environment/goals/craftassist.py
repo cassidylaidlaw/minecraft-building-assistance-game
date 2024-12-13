@@ -98,6 +98,7 @@ class CraftAssistGoalGenerator(GoalGenerator):
                 self.house_ids.append(house_id)
 
         self.remaining_house_ids = list(self.house_ids)
+        self.num_remaining_goals = len(self.house_ids)
 
     @functools.lru_cache
     def _minecraft_ids_to_block_variant(
@@ -120,6 +121,7 @@ class CraftAssistGoalGenerator(GoalGenerator):
             house_id = self.remaining_house_ids[house_index]
             if not self.config["repeat"]:
                 self.remaining_house_ids.pop(house_index)
+                self.num_remaining_goals = len(self.remaining_house_ids)
             schematic_fname = os.path.join(
                 self.config["data_dir"],
                 "houses",
