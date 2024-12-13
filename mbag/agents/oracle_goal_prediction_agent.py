@@ -455,12 +455,12 @@ class OracleGoalPredictor:
         # Set the goal block probabilities to the weighted sum of the goals according to
         # the goal probabilities.
         goal_blocks_probs = np.zeros(goal_pred_shape)
-        for goal, prob in zip(closest_transformed_goals, goal_probs):
+        for transformed_goal, prob in zip(closest_transformed_goals, goal_probs):
             goal_blocks_probs[
                 np.arange(goal_pred_shape[0])[:, None, None],
                 np.arange(goal_pred_shape[1])[None, :, None],
                 np.arange(goal_pred_shape[2])[None, None, :],
-                goal,
+                transformed_goal,
             ] += prob
 
         # If a block type has a probability of 0, set it to a small value to avoid
