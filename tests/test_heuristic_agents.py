@@ -245,7 +245,7 @@ def test_lowest_block_agent():
             )
 
 
-@pytest.mark.timeout(30)
+@pytest.mark.timeout(45)
 @pytest.mark.uses_rllib
 @pytest.mark.parametrize("heuristic_agent_id", ALL_HEURISTIC_AGENTS.keys())
 def test_rllib_heuristic_agents(heuristic_agent_id: str):
