@@ -67,5 +67,9 @@ class TransformedGoalGenerator(GoalGenerator):
     def num_remaining_goals(self) -> Optional[int]:
         return self.base_goal_generator.num_remaining_goals
 
+    @num_remaining_goals.setter
+    def num_remaining_goals(self, _: Optional[int]) -> None:
+        raise NotImplementedError("num_remaining_goals is read-only")
+
     def generate_goal(self, size: WorldSize) -> MinecraftBlocks:
         return self.goal_generator.generate_goal(size)
