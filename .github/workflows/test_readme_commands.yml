@@ -97,7 +97,7 @@ jobs:
       - name: Running assistants in Minecraft
         timeout-minutes: 10
         run: |
-          xvfb-run --auto-servernum --server-args="-screen 0 1024x768x24" python -m malmo.minecraft launch --num_instances 2 --goal_visibility True False &
+          xvfb-run --auto-servernum --server-args="-screen 0 1024x768x24" python -m malmo.minecraft launch --timeout 120 --num_instances 2 --goal_visibility True False &
           MC_PID=$!
 
           while ! netstat -tna | grep 'LISTEN\>' | grep -q ':'$((10001))'\>'; do

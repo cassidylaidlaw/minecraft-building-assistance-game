@@ -59,6 +59,10 @@ To play an episode without an assistant, run:
 
     python -m mbag.scripts.evaluate with human_alone assistant_checkpoint=data/example_assistant/checkpoint_001700
 
-The `assistant_checkpoint` argument is still needed in this case to load the environment configuration. The episode will automatically terminate when the house is completed, but if you want to end it sooner, use Ctrl+C. At the end of the episode, the episode data will be saved and metrics will be printed out.
+The `assistant_checkpoint` argument is still needed in this case to load the environment configuration.
 
-TODO: add other options (seed, num_simulations, etc.)
+Once the episode starts, press <kbd>Return</kbd> (<kbd>Enter</kbd>) to enable movement and <kbd>Delete</kbd> (<kbd>Fn</kbd> + <kbd>Backspace</kbd> on Mac) to enable flying.
+
+The episode will automatically terminate when the house is completed, but if you want to end it sooner, use <kbd>Ctrl</kbd>+<kbd>C</kbd>. At the end of the episode, the episode data will be saved and metrics will be printed out.
+
+TODO: add other options (seed, house_id, num_simulations, etc.)

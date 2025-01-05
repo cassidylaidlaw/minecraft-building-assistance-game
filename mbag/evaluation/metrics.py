@@ -166,18 +166,25 @@ def calculate_metrics(episode: MbagEpisode) -> MbagEpisodeMetrics:
     cumulative_reward = 0.0
     for t in range(episode.env_config["horizon"]):
         rounded_minutes = get_rounded_minutes(episode, t)
+        # Use the first player's info dict to get metrics that should be the same for
+        # all players (if there are multiple).
         info_dict = episode.info_history[min(t, episode.length - 1)][0]
         if t < len(episode.reward_history):
             cumulative_reward += episode.reward_history[t]
-        if rounded_minutes > 0:
-            goal_percentage_key = f"goal_percentage_{rounded_minutes}_min"
-            if goal_percentage_key not in metrics:
-                metrics[goal_percentage_key] = info_dict[  # type: ignore[literal-required]
-                    "goal_percentage"
-                ]
-            reward_key = f"reward_{rounded_minutes}_min"
-            if reward_key not in metrics:
-                metrics[reward_key] = cumulative_reward  # type: ignore[literal-required]
+        goal_percentage_key = f"goal_percentage_{rounded_minutes}_min"
+        if goal_percentage_key not in metrics:
+            metrics[goal_percentage_key] = info_dict[  # type: ignore[literal-required]
+                "goal_percentage"
+            ]
+        goal_similarity_key = f"goal_similarity_{rounded_minutes}_min"
+        if goal_similarity_key not in metrics:
+            metrics[goal_similarity_key] = info_dict["goal_similarity"]  # type: ignore[literal-required]
+        goal_distance_key = f"goal_distance_{rounded_minutes}_min"
+        if goal_distance_key not in metrics:
+            metrics[goal_distance_key] = width * height * depth - info_dict["goal_similarity"]  # type: ignore[literal-required]
+        reward_key = f"reward_{rounded_minutes}_min"
+        if reward_key not in metrics:
+            metrics[reward_key] = cumulative_reward  # type: ignore[literal-required]
 
     return metrics
 

@@ -838,117 +838,6 @@ class ResidualBlock(nn.Module):
         return out
 
 
-class UNet3d(nn.Module):
-    """
-    Implements a model similar to U-Nets, but for 3d data.
-    """
-
-    def __init__(
-        self,
-        size: int,
-        in_channels: int,
-        out_channels: int,
-        num_layers: int,
-        fc_layer: nn.Module = nn.Identity(),
-        grow_factor: float = 2.0,
-        use_bn: bool = False,
-    ):
-        """
-        Expects inputs of shape
-        (batch, in_channels, size, size, size)
-        and produces outputs of shape
-        (batch, out_channels, size, size, size)
-        """
-        super().__init__()
-
-        self.size = size
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.num_layers = num_layers
-        self.fc_layer = fc_layer
-
-        self.down_layers: List[nn.Module] = []
-        self.up_layers: List[nn.Module] = []
-        layer_size = self.size
-        for layer_index in range(self.num_layers):
-            down_in_channels = self.in_channels * int(grow_factor**layer_index)
-            down_out_channels = self.in_channels * int(grow_factor ** (layer_index + 1))
-            down_layer = nn.Sequential(
-                nn.Conv3d(
-                    in_channels=down_in_channels,
-                    out_channels=down_out_channels,
-                    kernel_size=3,
-                    stride=2,
-                    padding=1,
-                ),
-                *([nn.BatchNorm3d(down_out_channels)] if use_bn else []),
-                nn.LeakyReLU(),
-            )
-            self.down_layers.append(down_layer)
-            self.add_module(f"down_{layer_index}", down_layer)
-
-            up_in_channels = (
-                self.in_channels * 2 * int(grow_factor ** (layer_index + 1))
-            )
-            up_out_channels = self.in_channels * int(grow_factor**layer_index)
-            up_layer = nn.Sequential(
-                nn.ConvTranspose3d(
-                    in_channels=up_in_channels,
-                    out_channels=up_out_channels,
-                    kernel_size=3,
-                    stride=2,
-                    padding=1,
-                    output_padding=1 if layer_size % 2 == 0 else 0,
-                ),
-                *([nn.BatchNorm3d(up_out_channels)] if use_bn else []),
-                nn.LeakyReLU(),
-            )
-            self.up_layers.append(up_layer)
-            self.add_module(f"up_{layer_index}", up_layer)
-
-            layer_size = (layer_size + 1) // 2
-
-        self.fc_layer_size = (
-            (layer_size**3) * self.in_channels * int(grow_factor**self.num_layers)
-        )
-
-        # Final 1x1x1 convolution to get the right number of out channels.
-        self.final_layer = nn.Conv3d(
-            in_channels=self.in_channels * 2,
-            out_channels=self.out_channels,
-            kernel_size=1,
-        )
-
-    def set_fc_layer(self, fc_layer: nn.Module):
-        self.fc_layer = fc_layer
-
-    def forward(self, inputs: torch.Tensor, *extra_fc_inputs):
-        activations = [inputs]
-        for down_layer in self.down_layers:
-            activations.append(down_layer(activations[-1]))
-
-        fc_layer_inputs = activations[-1].flatten(start_dim=1)
-        outputs = self.fc_layer(fc_layer_inputs, *extra_fc_inputs)
-        outputs = outputs.reshape(activations[-1].size())
-
-        for layer_index, up_layer in reversed(list(enumerate(self.up_layers))):
-            w, h, d = outputs.size()[-3:]
-            layer_activations = F.pad(activations[layer_index + 1], (0, 2) * 3)[
-                ..., :w, :h, :d
-            ]
-            layer_inputs = torch.cat([layer_activations, outputs], dim=1)
-            outputs = up_layer(layer_inputs)
-
-        w, h, d = outputs.size()[-3:]
-        layer_activations = F.pad(activations[0], (0, 2) * 3)[..., :w, :h, :d]
-        final_layer_inputs = torch.cat([layer_activations, outputs], dim=1)
-
-        w, h, d = inputs.size()[-3:]
-        final_layer_inputs = final_layer_inputs[..., :w, :h, :d]
-
-        return self.final_layer(final_layer_inputs)
-
-
 class MbagConvolutionalModelConfig(MbagModelConfig, total=False):
     num_conv_1_layers: int
     """Number of 1x1x1 convolutions before the main backbone."""
@@ -958,10 +847,6 @@ class MbagConvolutionalModelConfig(MbagModelConfig, total=False):
     hidden_channels: int
     use_groupnorm: bool
     dropout: float
-    num_unet_layers: int
-    """Number of layers to include in a UNet3d, if any."""
-    unet_grow_factor: float
-    unet_use_bn: bool
     interleave_lstm_every: int
     lstm_size: Optional[int]
 
@@ -982,9 +867,6 @@ CONV_DEFAULT_CONFIG: MbagConvolutionalModelConfig = {
     "hidden_channels": 32,
     "use_groupnorm": False,
     "dropout": 0.0,
-    "num_unet_layers": 0,
-    "unet_grow_factor": 2.0,
-    "unet_use_bn": False,
     "interleave_lstm_every": -1,
     "lstm_size": None,
 }
@@ -1014,9 +896,6 @@ class MbagConvolutionalModel(MbagTorchModel):
         self.hidden_channels = extra_config["hidden_channels"]
         self.use_groupnorm = extra_config["use_groupnorm"]
         self.dropout = extra_config["dropout"]
-        self.num_unet_layers = extra_config["num_unet_layers"]
-        self.unet_grow_factor = extra_config["unet_grow_factor"]
-        self.unet_use_bn = extra_config["unet_use_bn"]
         self.interleave_lstm_every = extra_config["interleave_lstm_every"]
         self.lstm_size = extra_config.get("lstm_size") or self.hidden_channels
 
@@ -1065,39 +944,172 @@ class MbagConvolutionalModel(MbagTorchModel):
                     nn.LeakyReLU(),
                 )
 
-        if self.num_unet_layers == 0:
-            return InterleavedBackbone(
-                num_layers=self.num_layers,
-                layer_creator=layer_creator,
-                interleave_lstm_every=self.interleave_lstm_every,
-                hidden_size=self.hidden_channels,
-                lstm_size=self.lstm_size,
-            )
-        else:
-            assert self.interleave_lstm_every == -1
-            include_unet = not is_value_network
-            backbone_layers: List[nn.Module] = []
-            layer_index = 0
-            num_layers = self.num_conv_1_layers + self.num_layers
-            while layer_index < num_layers:
-                backbone_layers.append(layer_creator(layer_index))
-                layer_index += 1
-            if include_unet and self.num_unet_layers > 0:
-                self.unet = UNet3d(
-                    self.world_obs_space.shape[1],
-                    self.hidden_channels,
-                    self.hidden_channels,
-                    self.num_unet_layers,
-                    grow_factor=self.unet_grow_factor,
-                    use_bn=self.unet_use_bn,
-                )
-                backbone_layers.append(self.unet)
-            else:
-                backbone_layers = backbone_layers[:-1]  # Remove last ReLU.
-            return nn.Sequential(*backbone_layers)
+        return InterleavedBackbone(
+            num_layers=self.num_layers,
+            layer_creator=layer_creator,
+            interleave_lstm_every=self.interleave_lstm_every,
+            hidden_size=self.hidden_channels,
+            lstm_size=self.lstm_size,
+        )
 
 
 ModelCatalog.register_custom_model("mbag_convolutional_model", MbagConvolutionalModel)
+
+
+class MbagUNetModelConfig(MbagModelConfig, total=False):
+    hidden_channels: int
+    attention_resolutions: Sequence[int]
+    num_res_blocks: int
+    channel_mult: Sequence[int]
+    num_heads: int
+    use_scale_shift_norm: bool
+    resblock_updown: bool
+    use_lstm: int
+    lstm_size: Optional[int]
+
+
+UNET_DEFAULT_CONFIG: MbagUNetModelConfig = {
+    "env_config": DEFAULT_CONFIG["env_config"],
+    "embedding_size": DEFAULT_CONFIG["embedding_size"],
+    "use_extra_features": DEFAULT_CONFIG["use_extra_features"],
+    "mask_goal": DEFAULT_CONFIG["mask_goal"],
+    "hidden_size": DEFAULT_CONFIG["hidden_size"],
+    "num_action_layers": DEFAULT_CONFIG["num_action_layers"],
+    "num_value_layers": DEFAULT_CONFIG["num_value_layers"],
+    "fake_state": DEFAULT_CONFIG["fake_state"],
+    "hidden_channels": DEFAULT_CONFIG["hidden_size"],
+    "attention_resolutions": (),
+    "num_res_blocks": 1,
+    "channel_mult": (1, 2, 4),
+    "num_heads": 4,
+    "use_scale_shift_norm": True,
+    "resblock_updown": True,
+    "use_lstm": False,
+    "lstm_size": None,
+}
+
+
+class Unpad3d(nn.Module):
+    def __init__(self, padding: Tuple[int, int, int, int, int, int]):
+        super().__init__()
+        self.padding = padding
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x[
+            :,
+            :,
+            self.padding[0] : -self.padding[1],
+            self.padding[2] : -self.padding[3],
+            self.padding[4] : -self.padding[5],
+        ]
+
+
+class MbagUNetModel(MbagTorchModel):
+    """
+    Backbone is based on the UNet architecture from Stable Diffusion.
+    """
+
+    def __init__(
+        self,
+        obs_space: spaces.Space,
+        action_space: spaces.Space,
+        num_outputs: int,
+        model_config,
+        name,
+        **kwargs,
+    ):
+        extra_config: MbagUNetModelConfig = copy.deepcopy(UNET_DEFAULT_CONFIG)
+        extra_config.update(cast(MbagUNetModelConfig, kwargs))
+        self.hidden_channels = extra_config["hidden_channels"]
+        self.attention_resolutions = extra_config["attention_resolutions"]
+        self.num_res_blocks = extra_config["num_res_blocks"]
+        self.channel_mult = extra_config["channel_mult"]
+        self.num_heads = extra_config["num_heads"]
+        self.use_scale_shift_norm = extra_config["use_scale_shift_norm"]
+        self.resblock_updown = extra_config["resblock_updown"]
+        self.use_lstm = extra_config["use_lstm"]
+        self.lstm_size = extra_config.get("lstm_size") or self.hidden_channels
+
+        super().__init__(
+            obs_space, action_space, num_outputs, model_config, name, **kwargs
+        )
+
+    def get_initial_state(self):
+        if self.use_lstm:
+            assert isinstance(self.backbone, InterleavedBackbone)
+            state = self.backbone.get_initial_state(world_size=self.world_size)
+            if self.use_prev_blocks:
+                state.append(self._get_prev_blocks_initial_state())
+            return state
+        else:
+            return super().get_initial_state()
+
+    def _construct_backbone(self, is_value_network=False) -> nn.Module:
+        from .models.openai_unet import UNetModel
+
+        width, height, depth = self.world_size
+
+        pad_multiple = 2 ** (len(self.channel_mult) - 1)
+        padded_width = ((width - 1) // pad_multiple + 1) * pad_multiple
+        padded_height = ((height - 1) // pad_multiple + 1) * pad_multiple
+        padded_depth = ((depth - 1) // pad_multiple + 1) * pad_multiple
+        padding_left = (padded_width - width) // 2
+        padding_right = (padded_width - width + 1) // 2
+        padding_top = (padded_height - height) // 2
+        padding_bottom = (padded_height - height + 1) // 2
+        padding_front = (padded_depth - depth) // 2
+        padding_back = (padded_depth - depth + 1) // 2
+
+        def layer_creator(layer_index: int) -> nn.Module:
+            assert layer_index == 0
+            return nn.Sequential(
+                nn.ZeroPad3d(
+                    (
+                        padding_front,
+                        padding_back,
+                        padding_top,
+                        padding_bottom,
+                        padding_left,
+                        padding_right,
+                    )
+                ),
+                UNetModel(
+                    dims=3,
+                    image_size=(padded_width, padded_height, padded_depth),
+                    in_channels=self.hidden_channels,
+                    out_channels=self.hidden_channels,
+                    model_channels=self.hidden_channels,
+                    attention_resolutions=self.attention_resolutions,
+                    num_res_blocks=self.num_res_blocks,
+                    channel_mult=self.channel_mult,
+                    num_heads=self.num_heads,
+                    use_scale_shift_norm=self.use_scale_shift_norm,
+                    resblock_updown=self.resblock_updown,
+                    use_checkpoint=True,
+                ),
+                Unpad3d(
+                    (
+                        padding_left,
+                        padding_right,
+                        padding_top,
+                        padding_bottom,
+                        padding_front,
+                        padding_back,
+                    )
+                ),
+            )
+
+        return InterleavedBackbone(
+            num_layers=3 if self.use_lstm else 1,
+            layer_creator=layer_creator,
+            lstm_layer_indices=[0, 2] if self.use_lstm else [],
+            hidden_size=self.hidden_channels,
+            lstm_size=self.lstm_size,
+            use_checkpointing=False,
+        )
+
+
+ModelCatalog.register_custom_model("mbag_unet_model", MbagUNetModel)
 
 
 class OtherAgentActionPredictorMixin(MbagTorchModel):
@@ -1135,6 +1147,16 @@ class MbagConvolutionalAlphaZeroModel(
 
 ModelCatalog.register_custom_model(
     "mbag_convolutional_alphazero_model", MbagConvolutionalAlphaZeroModel
+)
+
+
+class MbagUNetAlphaZeroModel(MbagUNetModel, OtherAgentActionPredictorMixin):
+    pass
+
+
+ModelCatalog.register_custom_model(
+    "mbag_unet_alphazero_model",
+    MbagUNetAlphaZeroModel,
 )
 
 
@@ -1277,9 +1299,11 @@ class InterleavedBackbone(nn.Module):
         num_layers: int,
         layer_creator: Callable[[int], nn.Module],
         interleave_lstm_every: int = -1,
+        lstm_layer_indices: Optional[List[int]] = None,
         hidden_size: int = 64,
         lstm_size: int = 64,
         norm_first: bool = False,
+        use_checkpointing: bool = False,
     ):
         super().__init__()
 
@@ -1287,17 +1311,26 @@ class InterleavedBackbone(nn.Module):
         self.hidden_size = hidden_size
         self.lstm_size = lstm_size
         self.norm_first = norm_first
-        self.interleave_lstm_every = interleave_lstm_every
+        self.use_checkpointing = use_checkpointing
+
+        assert not (
+            interleave_lstm_every > 1 and lstm_layer_indices is not None
+        ), "Cannot specify both interleave_lstm_every and lstm_layer_indices."
+        if interleave_lstm_every > 0:
+            self.lstm_layer_indices = [
+                layer_index
+                for layer_index in range(num_layers)
+                if (layer_index + 1) % interleave_lstm_every == 0
+            ]
+        else:
+            self.lstm_layer_indices = lstm_layer_indices or []
 
         self.pre_lstm_layer_norms = nn.ModuleList()
         self.layers: List[nn.Module] = []
         num_non_lstm_layers = 0
         for layer_index in range(num_layers):
             layer: nn.Module
-            if (
-                self.interleave_lstm_every > 0
-                and (layer_index + 1) % self.interleave_lstm_every == 0
-            ):
+            if layer_index in self.lstm_layer_indices:
                 if self.lstm_size == self.hidden_size:
                     layer = nn.LSTM(
                         input_size=self.lstm_size,
@@ -1335,7 +1368,7 @@ class InterleavedBackbone(nn.Module):
         layer = self.layers[layer_index]
 
         if isinstance(layer, (nn.LSTM, ProjectedLSTM)):
-            lstm_index = layer_index // self.interleave_lstm_every
+            lstm_index = self.lstm_layer_indices.index(layer_index)
             lstm_state = state[2 * lstm_index : 2 * (lstm_index + 1)]
             x, state = self._run_lstm(
                 layer,
@@ -1425,7 +1458,7 @@ class InterleavedBackbone(nn.Module):
 
         state_out: List[torch.Tensor] = []
         for layer_index in range(self.num_layers):
-            if self.training:
+            if self.training and self.use_checkpointing:
                 from torch.utils.checkpoint import checkpoint
 
                 x, layer_state = checkpoint(
@@ -1446,8 +1479,8 @@ class InterleavedBackbone(nn.Module):
         return x, state_out
 
     def get_initial_state(self, world_size: WorldSize) -> List[torch.Tensor]:
-        if self.interleave_lstm_every > 0:
-            num_lstm_layers = len(self.layers) // self.interleave_lstm_every
+        num_lstm_layers = len(self.lstm_layer_indices)
+        if num_lstm_layers > 0:
             return [
                 torch.zeros((self.lstm_size, *world_size))
                 for _ in range(2 * num_lstm_layers)

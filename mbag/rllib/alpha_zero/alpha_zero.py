@@ -56,6 +56,7 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
             },
         }
         self.model_train_batch_size: int = self.train_batch_size
+        self.mcts_batch_size: Optional[int] = None
         self.sample_batch_size = 1000
         self.sample_freq = 1
         self.policy_loss_coeff = 1.0
@@ -85,6 +86,7 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
         use_model_replay_buffer=NotProvided,
         model_replay_buffer_config=NotProvided,
         model_train_batch_size=NotProvided,
+        mcts_batch_size=NotProvided,
         sample_freq=NotProvided,
         sample_batch_size=NotProvided,
         policy_loss_coeff=NotProvided,
@@ -117,6 +119,10 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
             model_replay_buffer_config (dict): Config for the model replay buffer.
             model_train_batch_size (int): Number of samples to include in each
                 training batch from the model replay buffer.
+            mcts_batch_size (int): Number of environments to run MCTS over in parallel.
+                If there are more environments than this, then they will be split into
+                batches of this size. If None, then this will be set to the number of
+                environments.
             sample_freq (int): If > 1, then only sample new data every `sample_freq`
                 iterations.
             sample_batch_size (int): Number of samples to include in each
@@ -164,6 +170,8 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
             self.model_replay_buffer_config.update(model_replay_buffer_config)
         if model_train_batch_size is not NotProvided:
             self.model_train_batch_size = model_train_batch_size
+        if mcts_batch_size is not NotProvided:
+            self.mcts_batch_size = mcts_batch_size
         if sample_freq is not NotProvided:
             self.sample_freq = sample_freq
         if sample_batch_size is not NotProvided:

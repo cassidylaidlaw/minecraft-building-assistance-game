@@ -58,6 +58,7 @@ from mbag.rllib.sacred_utils import (
 from mbag.rllib.torch_models import (
     MbagConvolutionalModelConfig,
     MbagTransformerModelConfig,
+    MbagUNetModelConfig,
 )
 from mbag.rllib.training_utils import (
     build_logger_creator,
@@ -337,6 +338,7 @@ def sacred_config(_log):  # noqa
     permute_block_types: bool = False
 
     # MCTS
+    mcts_batch_size = None
     puct_coefficient = 1.0
     sample_c_puct_every_timestep = True
     num_simulations = 30
@@ -410,9 +412,12 @@ def sacred_config(_log):  # noqa
     use_resnet = False
     use_groupnorm = False
     dropout = 0.0
-    num_unet_layers = 0
-    unet_grow_factor = 2
-    unet_use_bn = False
+    attention_resolutions = ()
+    num_res_blocks = 1
+    channel_mult = (1, 2, 4)
+    use_scale_shift_norm = True
+    resblock_updown = True
+    use_lstm = False
     custom_action_dist = "categorical_no_inf"
     model_config = {
         "custom_model": f"mbag_{model}_model",
@@ -445,9 +450,6 @@ def sacred_config(_log):  # noqa
             "line_of_sight_masking": line_of_sight_masking,
             "scale_obs": scale_obs,
             "vf_scale": vf_scale,
-            "num_unet_layers": num_unet_layers,
-            "unet_grow_factor": unet_grow_factor,
-            "unet_use_bn": unet_use_bn,
             "num_value_layers": num_value_layers,
             "interleave_lstm_every": interleave_lstm_every,
             "lstm_size": lstm_size,
@@ -482,6 +484,36 @@ def sacred_config(_log):  # noqa
             "vf_scale": vf_scale,
         }
         model_config["custom_model_config"] = transformer_config
+    elif "unet" in model:
+        unet_config: MbagUNetModelConfig = {
+            "env_config": cast(MbagConfigDict, dict(environment_params)),
+            "num_inventory_obs": num_inventory_obs,
+            "embedding_size": embedding_size,
+            "use_extra_features": use_extra_features,
+            "use_fc_after_embedding": use_fc_after_embedding,
+            "mask_goal": mask_goal,
+            "mask_other_players": mask_other_players,
+            "hidden_size": hidden_size,
+            "hidden_channels": hidden_channels,
+            "attention_resolutions": attention_resolutions,
+            "num_res_blocks": num_res_blocks,
+            "channel_mult": channel_mult,
+            "num_heads": num_heads,
+            "use_scale_shift_norm": use_scale_shift_norm,
+            "resblock_updown": resblock_updown,
+            "num_action_layers": num_action_layers,
+            "num_value_layers": num_value_layers,
+            "use_prev_blocks": use_prev_blocks,
+            "use_prev_action": use_prev_action,
+            "mask_action_distribution": mask_action_distribution,
+            "line_of_sight_masking": line_of_sight_masking,
+            "scale_obs": scale_obs,
+            "vf_scale": vf_scale,
+            "num_value_layers": num_value_layers,
+            "use_lstm": use_lstm,
+            "lstm_size": lstm_size,
+        }
+        model_config["custom_model_config"] = unet_config
 
     # Resume from checkpoint
     checkpoint_path = None  # noqa: F841
@@ -779,6 +811,7 @@ def sacred_config(_log):  # noqa
             ranked_rewards={"enable": False},
             num_steps_sampled_before_learning_starts=0,
             mcts_config=convert_dogmatics_to_standard(mcts_config),
+            mcts_batch_size=mcts_batch_size,
             use_critic=use_critic,
             use_goal_predictor=use_goal_predictor,
             expected_own_reward_scale=expected_own_reward_scale,
