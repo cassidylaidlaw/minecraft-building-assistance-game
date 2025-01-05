@@ -13,7 +13,11 @@ from ..environment.blocks import MinecraftBlocks
 from ..environment.types import CURRENT_BLOCKS, GOAL_BLOCKS, BlockLocation, MbagObs
 from .action_distributions import MbagActionDistribution
 from .mbag_agent import MbagAgent
-from .oracle_goal_prediction_agent import OracleGoalPredictionAgent
+
+try:
+    from .oracle_goal_prediction_agent import OracleGoalPredictionAgent
+except ImportError:
+    OracleGoalPredictionAgent = None
 
 
 class NoopAgent(MbagAgent):
@@ -411,5 +415,6 @@ ALL_HEURISTIC_AGENTS: Dict[str, Type[MbagAgent]] = {
     "priority_queue": PriorityQueueAgent,
     "lowest_block": LowestBlockAgent,
     "mirror_builder": MirrorBuildingAgent,
-    "oracle_goal_predictor": OracleGoalPredictionAgent,
 }
+if OracleGoalPredictionAgent is not None:
+    ALL_HEURISTIC_AGENTS["oracle_goal_predictor"] = OracleGoalPredictionAgent
