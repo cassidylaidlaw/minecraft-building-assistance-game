@@ -4,7 +4,6 @@ import pickle
 from typing import Any, List, Literal, Optional, Tuple, TypedDict, cast, get_args
 
 import numpy as np
-import torch
 import tqdm
 
 from mbag.agents.action_distributions import MbagActionDistribution
@@ -161,6 +160,44 @@ def calculate_goal_probs(
         goal_probs = np.ones(len(goal_probs)) / len(goal_probs)
 
     return goal_probs
+
+
+def cross_entropy_loss(input: np.ndarray, target: np.ndarray) -> float:
+    """Compute the cross entropy loss with mean reduction.
+
+    Args:
+        input: Predicted logits of shape (N, C) where N is batch size and C is number of
+            classes.
+        target: Ground truth class indices of shape (N,).
+
+    Returns:
+        Mean cross entropy loss across the batch.
+    """
+    if input.ndim == 1:
+        input = input.reshape(1, -1)
+    if target.ndim == 0:
+        target = target.reshape(1)
+    assert (
+        input.ndim == 2
+    ), f"Expected input to have 1 or 2 dimensions. Got: {input.ndim}."
+    assert target.ndim == 1, f"Expected target to have 1 dimension. Got: {target.ndim}."
+
+    n_samples, n_classes = input.shape
+
+    # Compute softmax. Subtract max for numerical stability.
+    input_max = np.max(input, axis=1, keepdims=True)
+    exp = np.exp(input - input_max)
+    softmax = exp / np.sum(exp, axis=1, keepdims=True)
+
+    # Convert targets to one-hot encoding.
+    target_one_hot = np.zeros((n_samples, n_classes))
+    target_one_hot[np.arange(n_samples), target] = 1
+
+    # Compute cross entropy loss.
+    log_softmax = np.log(softmax + 1e-12)  # Add small epsilon for numerical stability.
+    loss = -np.sum(target_one_hot * log_softmax) / n_samples
+
+    return float(loss)
 
 
 def maybe_load_generated_goals(
@@ -492,10 +529,7 @@ class OracleGoalPredictor:
         # Compute the cross-entropy between the true goal and the goal logits.
         flat_goal_logits = goal_logits.reshape(-1, goal_logits.shape[-1])
         flat_true_goal_blocks = true_goal_blocks.reshape(-1)
-        cross_entropy = torch.nn.functional.cross_entropy(
-            torch.from_numpy(flat_goal_logits).float(),
-            torch.from_numpy(flat_true_goal_blocks).long(),
-        ).item()
+        cross_entropy = cross_entropy_loss(flat_goal_logits, flat_true_goal_blocks)
 
         # Reshape to (NUM_BLOCKS, width, height, depth).
         goal_logits = goal_logits.transpose(3, 0, 1, 2)
