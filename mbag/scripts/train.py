@@ -24,7 +24,6 @@ from sacred import SETTINGS as SACRED_SETTINGS
 from sacred import Experiment
 from sacred.config.custom_containers import DogmaticDict
 from sacred.observers import FileStorageObserver
-from typing_extensions import Literal
 
 import mbag
 from mbag.agents.heuristic_agents import ALL_HEURISTIC_AGENTS
@@ -55,8 +54,9 @@ from mbag.rllib.policies import MbagAgentPolicy
 from mbag.rllib.ppo import MbagPPOConfig, MbagPPOTorchPolicy
 from mbag.rllib.sacred_utils import convert_dogmatics_to_standard
 from mbag.rllib.torch_models import (
-    MbagRecurrentConvolutionalModelConfig,
+    MbagConvolutionalModelConfig,
     MbagTransformerModelConfig,
+    MbagUNetModelConfig,
 )
 from mbag.rllib.training_utils import (
     build_logger_creator,
@@ -315,6 +315,10 @@ def sacred_config(_log):  # noqa
     entropy_coeff_start = 0 if "AlphaZero" in run else 0.01
     entropy_coeff_end = 0
     entropy_coeff_horizon = 1e5
+    entropy_coeff_schedule = [
+        [0, entropy_coeff_start],
+        [entropy_coeff_horizon, entropy_coeff_end],
+    ]
     kl_coeff = 0.2
     kl_target = 0.01
     clip_param = 0.05
@@ -339,6 +343,7 @@ def sacred_config(_log):  # noqa
     permute_block_types: bool = False
 
     # MCTS
+    mcts_batch_size = None
     puct_coefficient = 1.0
     sample_c_puct_every_timestep = True
     num_simulations = 30
@@ -362,8 +367,10 @@ def sacred_config(_log):  # noqa
     sample_from_full_support_policy = False
     explore_noops = True
     policy_loss_coeff = 1
+    prev_policy_kl_coeff = 0
     goal_loss_coeff = 0.5
     prev_goal_kl_coeff = 0
+    prev_goal_kl_coeff_schedule = None
     place_block_loss_coeff = 1
     place_block_loss_coeff_schedule = None
     predict_goal_using_next_state = False
@@ -374,9 +381,7 @@ def sacred_config(_log):  # noqa
     store_model_state_in_torch = False
 
     # Model
-    model: Literal["convolutional", "recurrent_convolutional", "transformer"] = (
-        "convolutional"
-    )
+    model: str = "convolutional"
     max_seq_len = horizon
     embedding_size = 16
     position_embedding_size = 48
@@ -393,8 +398,6 @@ def sacred_config(_log):  # noqa
     hidden_size = hidden_channels
     num_action_layers = 2
     num_value_layers = 2
-    use_per_location_lstm = False
-    lstm_depth = None
     num_lstm_layers = 1
     mask_action_distribution = True
     # Line-of-sight masking is super slow with teleportation=True.
@@ -406,15 +409,21 @@ def sacred_config(_log):  # noqa
     norm_first = False
     use_separated_transformer = False
     interleave_lstm = False
-    fix_interleave_lstm = True
+    interleave_lstm_every = -1
+    lstm_size = hidden_size
     use_prev_blocks = False
     use_prev_action = False
     use_prev_other_agent_action = False
     assert not use_prev_other_agent_action
-    use_resnet = False
-    num_unet_layers = 0
-    unet_grow_factor = 2
-    unet_use_bn = False
+    use_resnet = True
+    use_groupnorm = False
+    dropout = 0.0
+    attention_resolutions = ()
+    num_res_blocks = 1
+    channel_mult = (1, 2, 4)
+    use_scale_shift_norm = True
+    resblock_updown = True
+    use_lstm = False
     custom_action_dist = "categorical_no_inf"
     model_config = {
         "custom_model": f"mbag_{model}_model",
@@ -423,7 +432,7 @@ def sacred_config(_log):  # noqa
         "vf_share_layers": vf_share_layers,
     }
     if "convolutional" in model:
-        conv_config: MbagRecurrentConvolutionalModelConfig = {
+        conv_config: MbagConvolutionalModelConfig = {
             "env_config": cast(MbagConfigDict, dict(environment_params)),
             "num_inventory_obs": num_inventory_obs,
             "embedding_size": embedding_size,
@@ -434,23 +443,22 @@ def sacred_config(_log):  # noqa
             "num_conv_1_layers": num_conv_1_layers,
             "num_layers": num_layers,
             "use_resnet": use_resnet,
+            "use_groupnorm": use_groupnorm,
+            "dropout": dropout,
             "filter_size": filter_size,
+            "hidden_size": hidden_size,
             "hidden_channels": hidden_channels,
             "num_action_layers": num_action_layers,
             "num_value_layers": num_value_layers,
-            "use_per_location_lstm": use_per_location_lstm,
-            "lstm_depth": lstm_depth,
-            "num_lstm_layers": num_lstm_layers,
             "use_prev_blocks": use_prev_blocks,
             "use_prev_action": use_prev_action,
             "mask_action_distribution": mask_action_distribution,
             "line_of_sight_masking": line_of_sight_masking,
             "scale_obs": scale_obs,
             "vf_scale": vf_scale,
-            "num_unet_layers": num_unet_layers,
-            "unet_grow_factor": unet_grow_factor,
-            "unet_use_bn": unet_use_bn,
             "num_value_layers": num_value_layers,
+            "interleave_lstm_every": interleave_lstm_every,
+            "lstm_size": lstm_size,
         }
         model_config["custom_model_config"] = conv_config
     elif "transformer" in model:
@@ -467,24 +475,52 @@ def sacred_config(_log):  # noqa
             "num_layers": num_layers,
             "dim_feedforward": dim_feedforward,
             "num_heads": num_heads,
+            "dropout": dropout,
             "norm_first": norm_first,
             "hidden_size": hidden_size,
             "num_action_layers": num_action_layers,
             "num_value_layers": num_value_layers,
-            "use_per_location_lstm": use_per_location_lstm,
-            "lstm_depth": lstm_depth,
             "num_lstm_layers": num_lstm_layers,
             "use_prev_blocks": use_prev_blocks,
             "use_prev_action": use_prev_action,
             "use_separated_transformer": use_separated_transformer,
             "interleave_lstm": interleave_lstm,
-            "fix_interleave_lstm": fix_interleave_lstm,
             "mask_action_distribution": mask_action_distribution,
             "line_of_sight_masking": line_of_sight_masking,
             "scale_obs": scale_obs,
             "vf_scale": vf_scale,
         }
         model_config["custom_model_config"] = transformer_config
+    elif "unet" in model:
+        unet_config: MbagUNetModelConfig = {
+            "env_config": cast(MbagConfigDict, dict(environment_params)),
+            "num_inventory_obs": num_inventory_obs,
+            "embedding_size": embedding_size,
+            "use_extra_features": use_extra_features,
+            "use_fc_after_embedding": use_fc_after_embedding,
+            "mask_goal": mask_goal,
+            "mask_other_players": mask_other_players,
+            "hidden_size": hidden_size,
+            "hidden_channels": hidden_channels,
+            "attention_resolutions": attention_resolutions,
+            "num_res_blocks": num_res_blocks,
+            "channel_mult": channel_mult,
+            "num_heads": num_heads,
+            "use_scale_shift_norm": use_scale_shift_norm,
+            "resblock_updown": resblock_updown,
+            "num_action_layers": num_action_layers,
+            "num_value_layers": num_value_layers,
+            "use_prev_blocks": use_prev_blocks,
+            "use_prev_action": use_prev_action,
+            "mask_action_distribution": mask_action_distribution,
+            "line_of_sight_masking": line_of_sight_masking,
+            "scale_obs": scale_obs,
+            "vf_scale": vf_scale,
+            "num_value_layers": num_value_layers,
+            "use_lstm": use_lstm,
+            "lstm_size": lstm_size,
+        }
+        model_config["custom_model_config"] = unet_config
 
     # Resume from checkpoint
     checkpoint_path = None  # noqa: F841
@@ -696,10 +732,9 @@ def sacred_config(_log):  # noqa
             num_sgd_iter=num_sgd_iter,
             vf_loss_coeff=vf_loss_coeff,
             vf_clip_param=float("inf"),
-            entropy_coeff_schedule=[
-                [0, entropy_coeff_start],
-                [entropy_coeff_horizon, entropy_coeff_end],
-            ],
+            entropy_coeff_schedule=convert_dogmatics_to_standard(
+                entropy_coeff_schedule
+            ),
             grad_clip=grad_clip,
             lambda_=gae_lambda,
             kl_coeff=kl_coeff,
@@ -770,17 +805,21 @@ def sacred_config(_log):  # noqa
             sgd_minibatch_size=sgd_minibatch_size,
             num_sgd_iter=num_sgd_iter,
             policy_loss_coeff=policy_loss_coeff,
+            prev_policy_kl_coeff=prev_policy_kl_coeff,
             vf_loss_coeff=vf_loss_coeff,
             prev_goal_kl_coeff=prev_goal_kl_coeff,
-            entropy_coeff_schedule=[
-                (0, entropy_coeff_start),
-                (entropy_coeff_horizon, entropy_coeff_end),
-            ],
+            prev_goal_kl_coeff_schedule=convert_dogmatics_to_standard(
+                prev_goal_kl_coeff_schedule
+            ),
+            entropy_coeff_schedule=convert_dogmatics_to_standard(
+                entropy_coeff_schedule
+            ),
             sample_freq=sample_freq,
             sample_batch_size=sample_batch_size,
             ranked_rewards={"enable": False},
             num_steps_sampled_before_learning_starts=0,
             mcts_config=convert_dogmatics_to_standard(mcts_config),
+            mcts_batch_size=mcts_batch_size,
             use_critic=use_critic,
             use_goal_predictor=use_goal_predictor,
             expected_own_reward_scale=expected_own_reward_scale,

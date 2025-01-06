@@ -31,7 +31,8 @@ def make_named_configs(ex: Experiment):
         num_sgd_iter = 3
         rollout_fragment_length = 100
         use_extra_features = True
-        model = "transformer"
+        model = "convolutional"
+        filter_size = 5
         hidden_channels = 64
         sgd_minibatch_size = 512
         use_separated_transformer = True
@@ -111,8 +112,9 @@ def make_named_configs(ex: Experiment):
         evaluation_num_workers = 0
         num_gpus = 0.5 if torch.cuda.is_available() else 0
         num_gpus_per_worker = 0.025 if torch.cuda.is_available() else 0
-        model = "transformer"
-        hidden_size = 64
+        model = "convolutional"
+        filter_size = 5
+        hidden_channels = 64
         use_separated_transformer = True
         num_layers = 6
         vf_share_layers = True
@@ -174,15 +176,18 @@ def make_named_configs(ex: Experiment):
         if data_split != "human_alone":
             num_players = 2
         evaluation_num_players = 1
-        model = "transformer"
+        model = "convolutional"
+        dropout = 0.7
         line_of_sight_masking = True
-        hidden_size = 64
+        hidden_channels = 64
+        filter_size = 5
         norm_first = False
-        use_prev_action = False
+        use_prev_action = True
         use_fc_after_embedding = True
         sgd_minibatch_size = 128
         use_separated_transformer = True
         interleave_lstm = False
+        interleave_lstm_every = 4 if interleave_lstm else -1
         num_layers = 8 if interleave_lstm else 6
         vf_share_layers = True
         num_sgd_iter = 1
@@ -193,7 +198,7 @@ def make_named_configs(ex: Experiment):
         compress_observations = True
         horizon = 1500
         mask_action_distribution = True
-        num_training_iters = 20
+        num_training_iters = 40
         entropy_coeff_start = 0
         evaluation_explore = True
         checkpoint_name = None
@@ -224,24 +229,24 @@ def make_named_configs(ex: Experiment):
         elif data_split == "combined":
             input += "_player_0_inventory_0_1"
         if interleave_lstm:
-            input += "_seq_64"  # _overlap_4"
+            input += "_seq_64"
             max_seq_len = 64
-            # train_batch_size *= 4
-            # lr_schedule[1][0] *= 4
 
         experiment_tag = f"bc_human/lr_{lr_start}/infinite_blocks_{str(inf_blocks).lower()}/{data_split}"
         if not (
-            ((num_layers, hidden_size) == (6, 64) and not interleave_lstm)
-            or ((num_layers, hidden_size) == (8, 64) and interleave_lstm)
+            ((num_layers, hidden_channels) == (6, 64) and not interleave_lstm)
+            or ((num_layers, hidden_channels) == (8, 64) and interleave_lstm)
         ):
-            experiment_tag += f"/model_{num_layers}x{hidden_size}"
+            experiment_tag += f"/model_{num_layers}x{hidden_channels}"
+        if dropout != 0.7:
+            experiment_tag += f"/dropout_{dropout}"
         if interleave_lstm:
-            experiment_tag += "/lstm"  # _overlap_4"
+            experiment_tag += "/lstm"
         if use_prev_action:
             experiment_tag += "/use_prev_action"
         if norm_first:
             experiment_tag += "/norm_first"
-        if num_training_iters != 20:
+        if num_training_iters != 40:
             experiment_tag += f"/{num_training_iters}_iters"
         if checkpoint_to_load_policies is not None:
             experiment_tag += f"/init_{checkpoint_name}"
@@ -260,7 +265,8 @@ def make_named_configs(ex: Experiment):
         height = 10
         depth = 10
         gamma = 0.95
-        model = "transformer"
+        model = "convolutional"
+        filter_size = 5
         hidden_channels = 64
         sgd_minibatch_size = 128
         use_separated_transformer = True
@@ -340,7 +346,8 @@ def make_named_configs(ex: Experiment):
         num_sgd_iter = 3
         rollout_fragment_length = 511
         batch_mode = "truncate_episodes"
-        model = "transformer"
+        model = "convolutional"
+        filter_size = 5
         hidden_size = 64
         max_seq_len = 511
         sgd_minibatch_size = 512
@@ -361,7 +368,7 @@ def make_named_configs(ex: Experiment):
         goal_loss_coeff = 30
         mask_goal = True
         use_per_location_lstm = False
-        interleave_lstm = True
+        interleave_lstm_every = num_layers // 2
         policies_to_train = ["assistant"]
         checkpoint_to_load_policies = None
         checkpoint_name = ""
@@ -408,7 +415,8 @@ def make_named_configs(ex: Experiment):
         num_gpus_per_worker = 0.08
         num_sgd_iter = 1
         batch_mode = "truncate_episodes"
-        model = "transformer_alpha_zero"
+        model = "convolutional_alpha_zero"
+        filter_size = 5
         hidden_size = 64
         sgd_minibatch_size = 1024
         use_separated_transformer = True
@@ -420,7 +428,7 @@ def make_named_configs(ex: Experiment):
         embedding_size = 16
         position_embedding_size = 48
         position_embedding_angle = 10
-        interleave_lstm = True
+        interleave_lstm_every = num_layers // 2
 
         num_simulations = 100
         use_bilevel_action_selection = True

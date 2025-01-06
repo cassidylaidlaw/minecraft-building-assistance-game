@@ -17,6 +17,7 @@ from ray.rllib.policy.torch_mixins import EntropyCoeffSchedule, LearningRateSche
 from ray.rllib.policy.torch_policy import TorchPolicy
 from ray.rllib.policy.view_requirement import ViewRequirement
 from ray.rllib.utils.numpy import convert_to_numpy
+from ray.rllib.utils.schedules import ConstantSchedule, PiecewiseSchedule, Schedule
 from ray.rllib.utils.torch_utils import (
     apply_grad_clipping,
     explained_variance,
@@ -43,6 +44,7 @@ from .mcts import MbagMCTS, MbagMCTSNode, MbagRootParentNode
 from .planning import MbagEnvModel
 
 ENV_STATES = "env_states"
+PRIOR_POLICIES = "prior_policies"
 MCTS_POLICIES = "mcts_policies"
 OTHER_AGENT_ACTION_DIST_INPUTS = "other_agent_action_dist_inputs"
 OWN_REWARDS = "own_rewards"
@@ -50,6 +52,7 @@ EXPECTED_REWARDS = "expected_rewards"
 EXPECTED_OWN_REWARDS = "expected_own_rewards"
 VALUE_ESTIMATES = "value_estimates"
 GOAL_LOGITS = "goal_logits"
+PREV_GOAL_KL_COEFF = "prev_goal_kl_coeff"
 FORCE_NOOP = "force_noop"
 C_PUCT = "c_puct"
 PREV_C_PUCT = "prev_c_puct"
@@ -144,6 +147,9 @@ class MbagAlphaZeroPolicy(
         self.view_requirements[MCTS_POLICIES] = ViewRequirement(
             space=spaces.Box(low=0, high=1, shape=(action_space.n,))
         )
+        self.view_requirements[PRIOR_POLICIES] = ViewRequirement(
+            space=spaces.Box(low=0, high=1, shape=(action_space.n,))
+        )
         self.view_requirements[SampleBatch.ACTION_DIST_INPUTS] = ViewRequirement(
             space=spaces.Box(low=-np.inf, high=np.inf, shape=(action_space.n,))
         )
@@ -185,6 +191,20 @@ class MbagAlphaZeroPolicy(
             config["lr"],
             config["lr_schedule"],
         )
+
+        self._prev_goal_kl_coeff_schedule: Schedule
+        prev_goal_kl_coeff_schedule = config.get("prev_goal_kl_coeff_schedule")
+        if isinstance(prev_goal_kl_coeff_schedule, list):
+            self._prev_goal_kl_coeff_schedule = PiecewiseSchedule(
+                prev_goal_kl_coeff_schedule,
+                outside_value=prev_goal_kl_coeff_schedule[-1][-1],
+                framework=None,
+            )
+        else:
+            self._prev_goal_kl_coeff_schedule = ConstantSchedule(
+                config["prev_goal_kl_coeff"]
+            )
+        self.prev_goal_kl_coeff = self._prev_goal_kl_coeff_schedule.value(0)
 
     def set_training(self, training: bool):
         self._training = training
@@ -313,17 +333,73 @@ class MbagAlphaZeroPolicy(
                 )
             )
 
-        mcts_policies, actions = self.mcts.compute_actions(nodes)
-
         expected_rewards_list: List[float] = []
         expected_own_rewards_list: List[float] = []
-        for node, action in zip(nodes, actions):
-            if self.mcts.num_sims > 1:
-                expected_reward, expected_own_reward = node.get_expected_rewards(action)
-            else:
-                expected_reward, expected_own_reward = 0, 0
-            expected_rewards_list.append(expected_reward)
-            expected_own_rewards_list.append(expected_own_reward)
+        nodes_state_out: List[List[np.ndarray]] = []
+        action_masks: List[np.ndarray] = []
+        value_estimates_list: List[float] = []
+        c_puct_list: List[float] = []
+        goal_logits_list: List[Optional[np.ndarray]] = []
+        prior_policies_list: List[np.ndarray] = []
+
+        mcts_batch_size = self.config.get("mcts_batch_size")
+        if mcts_batch_size is None:
+            mcts_policies, actions = self.mcts.compute_actions(nodes)
+
+            for node, action in zip(nodes, actions):
+                if self.mcts.num_sims > 1:
+                    expected_reward, expected_own_reward = node.get_expected_rewards(
+                        action
+                    )
+                else:
+                    expected_reward, expected_own_reward = 0, 0
+                expected_rewards_list.append(expected_reward)
+                expected_own_rewards_list.append(expected_own_reward)
+
+                nodes_state_out.append(
+                    [convert_to_numpy(state) for state in node.model_state_out]
+                )
+                action_masks.append(node.valid_actions)
+                value_estimates_list.append(node.value_estimate)
+                c_puct_list.append(node.c_puct)
+                goal_logits_list.append(node.goal_logits)
+                prior_policies_list.append(node.child_priors)
+        else:
+            mcts_policies_batches: List[np.ndarray] = []
+            actions_batches: List[np.ndarray] = []
+            while len(nodes) > 0:
+                batch_nodes, nodes = nodes[:mcts_batch_size], nodes[mcts_batch_size:]
+                mcts_policies_batch, actions_batch = self.mcts.compute_actions(
+                    batch_nodes
+                )
+
+                mcts_policies_batches.append(mcts_policies_batch)
+                actions_batches.append(actions_batch)
+
+                for node, action in zip(batch_nodes, actions_batch):
+                    if self.mcts.num_sims > 1:
+                        expected_reward, expected_own_reward = (
+                            node.get_expected_rewards(action)
+                        )
+                    else:
+                        expected_reward, expected_own_reward = 0, 0
+                    expected_rewards_list.append(expected_reward)
+                    expected_own_rewards_list.append(expected_own_reward)
+
+                    nodes_state_out.append(
+                        [convert_to_numpy(state) for state in node.model_state_out]
+                    )
+                    action_masks.append(node.valid_actions)
+                    value_estimates_list.append(node.value_estimate)
+                    c_puct_list.append(node.c_puct)
+                    goal_logits_list.append(node.goal_logits)
+                    prior_policies_list.append(node.child_priors)
+
+            mcts_policies = np.concatenate(mcts_policies_batches, axis=0)
+            actions = np.concatenate(actions_batches, axis=0)
+
+        del nodes
+
         expected_rewards = np.array(expected_rewards_list)
         expected_own_rewards = np.array(expected_own_rewards_list)
 
@@ -331,20 +407,19 @@ class MbagAlphaZeroPolicy(
         for state_index in range(model_state_len):
             state_out.append(
                 np.stack(
-                    [
-                        convert_to_numpy(node.model_state_out[state_index])
-                        for node in nodes
-                    ],
+                    [state_out[state_index] for state_out in nodes_state_out],
                     axis=0,
                 )
             )
 
-        action_mask = np.stack([node.valid_actions for node in nodes], axis=0)
-        value_estimates = np.array([node.value_estimate for node in nodes])
-        c_puct = np.array([node.c_puct for node in nodes])
+        action_mask = np.stack(action_masks, axis=0)
+        prior_policies = np.stack(prior_policies_list, axis=0)
+        value_estimates = np.array(value_estimates_list)
+        c_puct = np.array(c_puct_list)
 
         extra_out = {
             ACTION_MASK: action_mask,
+            PRIOR_POLICIES: prior_policies,
             MCTS_POLICIES: mcts_policies,
             EXPECTED_REWARDS: expected_rewards,
             EXPECTED_OWN_REWARDS: expected_own_rewards,
@@ -359,7 +434,8 @@ class MbagAlphaZeroPolicy(
                 return goal_logits
 
             extra_out[GOAL_LOGITS] = np.stack(
-                [enforce_not_none(node.goal_logits) for node in nodes], axis=0
+                [enforce_not_none(goal_logits) for goal_logits in goal_logits_list],
+                axis=0,
             )
 
         return actions, state_out, extra_out
@@ -384,13 +460,14 @@ class MbagAlphaZeroPolicy(
         input_dict[ACTION_MASK] = action_mask
 
         # Run inputs through the model to get state_out and value function.
-        _, state_out_torch = self._run_model_on_input_dict(input_dict)
+        logits, state_out_torch = self._run_model_on_input_dict(input_dict)
         state_out = convert_to_numpy(state_out_torch)
         value_estimates = convert_to_numpy(self.model.value_function())
 
         extra_out = {
             ACTION_MASK: action_mask,
             MCTS_POLICIES: mcts_policies,
+            PRIOR_POLICIES: convert_to_numpy(torch.softmax(logits, dim=1)),
             EXPECTED_REWARDS: expected_rewards,
             EXPECTED_OWN_REWARDS: expected_own_rewards,
             VALUE_ESTIMATES: value_estimates,
@@ -494,6 +571,7 @@ class MbagAlphaZeroPolicy(
 
         action_mask = compute_actions_extra_out[ACTION_MASK]
         mcts_policies = compute_actions_extra_out[MCTS_POLICIES]
+        prior_policies = compute_actions_extra_out[PRIOR_POLICIES]
         action_dist_inputs = np.log(mcts_policies)
         action_dist_inputs[mcts_policies == 0] = MbagTorchModel.MASK_LOGIT
         extra_out = {
@@ -505,6 +583,7 @@ class MbagAlphaZeroPolicy(
             ),
             ACTION_MASK: action_mask,
             MCTS_POLICIES: mcts_policies,
+            PRIOR_POLICIES: prior_policies,
             SampleBatch.ACTION_DIST_INPUTS: action_dist_inputs,
             EXPECTED_REWARDS: compute_actions_extra_out[EXPECTED_REWARDS],
             EXPECTED_OWN_REWARDS: compute_actions_extra_out[EXPECTED_OWN_REWARDS],
@@ -574,6 +653,10 @@ class MbagAlphaZeroPolicy(
         infos.append(last_info)
         sample_batch[OWN_REWARDS] = np.array([info["own_reward"] for info in infos])
 
+        sample_batch[PREV_GOAL_KL_COEFF] = np.full(
+            len(sample_batch), self.prev_goal_kl_coeff
+        )
+
         # Remove state_out_* entries from the sample batch since they aren't needed
         # for training and they take up a lot of space.
         for key in list(sample_batch.keys()):
@@ -640,6 +723,14 @@ class MbagAlphaZeroPolicy(
         policy_loss = reduce_mean_policy(
             -torch.sum(train_batch[MCTS_POLICIES] * dist.dist.logits, dim=-1)
         )
+        prev_policy_kl = reduce_mean_policy(
+            F.kl_div(
+                F.log_softmax(dist.dist.logits, dim=1),
+                cast(torch.Tensor, train_batch[PRIOR_POLICIES]),
+                log_target=False,
+                reduction="none",
+            ).sum(dim=1)
+        )
         value_loss = reduce_mean_policy(
             (values - train_batch[Postprocessing.VALUE_TARGETS]) ** 2
         )
@@ -664,6 +755,9 @@ class MbagAlphaZeroPolicy(
         unplaced_blocks_goal_loss = goal_ce[unplaced_blocks].mean()
 
         prev_goal_kl: torch.Tensor = torch.tensor(0.0, device=policy_loss.device)
+        weighted_prev_goal_kl: torch.Tensor = torch.tensor(
+            0.0, device=policy_loss.device
+        )
         if GOAL_LOGITS in train_batch:
             prev_goal_logits = cast(torch.Tensor, train_batch[GOAL_LOGITS])
             prev_goal_logits = prev_goal_logits.permute(0, 2, 3, 4, 1).flatten(
@@ -679,20 +773,26 @@ class MbagAlphaZeroPolicy(
                 )
                 .sum(dim=1)
                 .reshape_as(goal_ce)
+                .flatten(start_dim=1)
+                .mean(dim=1)
             )
-            prev_goal_kl = reduce_mean_model(
-                prev_goal_kl.flatten(start_dim=1).mean(dim=1)
-            )
+            weighted_prev_goal_kl = prev_goal_kl * train_batch[PREV_GOAL_KL_COEFF]
+            prev_goal_kl = reduce_mean_model(prev_goal_kl)
+            weighted_prev_goal_kl = reduce_mean_model(weighted_prev_goal_kl)
 
         # Compute total loss.
         total_loss: torch.Tensor = (
             self.config["vf_loss_coeff"] * value_loss
             + self.config["goal_loss_coeff"] * goal_loss
-            + self.config["prev_goal_kl_coeff"] * prev_goal_kl
+            + weighted_prev_goal_kl
             - self.entropy_coeff * entropy
         )
         if not self.config["pretrain"]:
-            total_loss = total_loss + policy_loss
+            total_loss = (
+                total_loss
+                + self.config["policy_loss_coeff"] * policy_loss
+                + self.config["prev_policy_kl_coeff"] * prev_policy_kl
+            )
 
         if isinstance(model, OtherAgentActionPredictorMixin):
             # Compute other agent action prediction loss.
@@ -743,6 +843,7 @@ class MbagAlphaZeroPolicy(
 
         model.tower_stats["total_loss"] = total_loss.detach()
         model.tower_stats["policy_loss"] = policy_loss.detach()
+        model.tower_stats["prev_policy_kl"] = prev_policy_kl.detach()
         model.tower_stats["vf_loss"] = value_loss.detach()
         model.tower_stats["vf_explained_var"] = cast(
             torch.Tensor,
@@ -750,6 +851,7 @@ class MbagAlphaZeroPolicy(
         ).detach()
         model.tower_stats["goal_loss"] = goal_loss.detach()
         model.tower_stats["prev_goal_kl"] = prev_goal_kl.detach()
+        model.tower_stats["weighted_prev_goal_kl"] = weighted_prev_goal_kl.detach()
         model.tower_stats["unplaced_blocks_goal_loss"] = (
             unplaced_blocks_goal_loss.detach()
         )
@@ -791,10 +893,12 @@ class MbagAlphaZeroPolicy(
         for metric in [
             "total_loss",
             "policy_loss",
+            "prev_policy_kl",
             "vf_loss",
             "vf_explained_var",
             "goal_loss",
             "prev_goal_kl",
+            "weighted_prev_goal_kl",
             "unplaced_blocks_goal_loss",
             "entropy",
             "other_agent_action_predictor_loss",
@@ -815,3 +919,7 @@ class MbagAlphaZeroPolicy(
             self.global_timestep_for_envs = global_vars["timestep"]
         for env in self.envs:
             unwrap_mbag_env(env).update_global_timestep(self.global_timestep_for_envs)
+
+        self.prev_goal_kl_coeff = self._prev_goal_kl_coeff_schedule.value(
+            global_vars["timestep"]
+        )

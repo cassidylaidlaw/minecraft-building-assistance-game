@@ -821,7 +821,7 @@
         0.0001
       ],
       [
-        96420,
+        192840.0,
         1e-05
       ]
     ],
@@ -939,9 +939,9 @@
           "goal_loss_coeff": 0.5,
           "model": {
             "custom_action_dist": "mbag_bilevel_categorical",
-            "custom_model": "mbag_transformer_model",
+            "custom_model": "mbag_convolutional_model",
             "custom_model_config": {
-              "dim_feedforward": 64,
+              "dropout": 0.0,
               "embedding_size": 16,
               "env_config": {
                 "abilities": {
@@ -1046,30 +1046,27 @@
                   10
                 ]
               },
-              "fix_interleave_lstm": true,
+              "filter_size": 5,
+              "hidden_channels": 64,
               "hidden_size": 64,
-              "interleave_lstm": false,
+              "interleave_lstm_every": -1,
               "line_of_sight_masking": true,
-              "lstm_depth": null,
+              "lstm_size": 64,
               "mask_action_distribution": true,
               "mask_goal": false,
               "mask_other_players": true,
-              "norm_first": false,
               "num_action_layers": 2,
-              "num_heads": 4,
+              "num_conv_1_layers": 1,
               "num_inventory_obs": 1,
               "num_layers": 6,
-              "num_lstm_layers": 1,
               "num_value_layers": 2,
-              "position_embedding_angle": 10,
-              "position_embedding_size": 48,
               "scale_obs": true,
               "use_extra_features": true,
               "use_fc_after_embedding": true,
-              "use_per_location_lstm": false,
+              "use_groupnorm": false,
               "use_prev_action": false,
               "use_prev_blocks": false,
-              "use_separated_transformer": true,
+              "use_resnet": true,
               "vf_scale": 1.0
             },
             "max_seq_len": 1500,

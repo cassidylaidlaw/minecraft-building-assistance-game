@@ -35,7 +35,9 @@ def available_cpu_count() -> int:  # noqa: C901
     try:
         import psutil
 
-        return psutil.cpu_count()  # psutil.NUM_CPUS on old versions
+        cpu_count = psutil.cpu_count()  # psutil.NUM_CPUS on old versions
+        if cpu_count is not None:
+            return cpu_count
     except (ImportError, AttributeError):
         pass
 

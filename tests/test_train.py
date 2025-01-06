@@ -171,26 +171,6 @@ def test_kl_regularized_ppo(default_config, dummy_ppo_checkpoint_fname):
 @pytest.mark.uses_rllib
 @pytest.mark.slow
 @pytest.mark.timeout(60)
-def test_lstm(default_config):
-    result = ex.run(
-        config_updates={
-            **default_config,
-            "num_workers": 0,  # TODO: remove
-            "use_per_location_lstm": True,
-            "max_seq_len": 5,
-            "sgd_minibatch_size": 20,
-            "vf_share_layers": True,
-            "use_prev_blocks": True,
-        }
-    ).result
-
-    assert result is not None
-    assert result["custom_metrics"]["human/own_reward_mean"] > -10
-
-
-@pytest.mark.uses_rllib
-@pytest.mark.slow
-@pytest.mark.timeout(60)
 def test_transformer(default_config):
     result = ex.run(
         config_updates={
@@ -438,34 +418,6 @@ def test_alpha_zero_assistant_with_bc(default_config, default_alpha_zero_config)
 @pytest.mark.uses_rllib
 @pytest.mark.slow
 @pytest.mark.timeout(60)
-def test_lstm_alpha_zero_assistant(
-    default_config, default_alpha_zero_config, dummy_ppo_checkpoint_fname
-):
-    result = ex.run(
-        config_updates={
-            **default_config,
-            **default_alpha_zero_config,
-            "num_players": 2,
-            "mask_goal": True,
-            "use_extra_features": False,
-            "checkpoint_to_load_policies": dummy_ppo_checkpoint_fname,
-            "load_policies_mapping": {"human": "human"},
-            "policies_to_train": ["assistant"],
-            "model": "transformer_alpha_zero",
-            "use_per_location_lstm": True,
-            "max_seq_len": 5,
-            "sgd_minibatch_size": 20,
-            "vf_share_layers": True,
-        }
-    ).result
-    assert result is not None
-    assert result["custom_metrics"]["human/own_reward_mean"] > -10
-    assert result["custom_metrics"]["assistant/own_reward_mean"] > -10
-
-
-@pytest.mark.uses_rllib
-@pytest.mark.slow
-@pytest.mark.timeout(60)
 def test_alpha_zero_with_model_replay_buffer(
     default_config, default_alpha_zero_config, dummy_ppo_checkpoint_fname
 ):
@@ -480,8 +432,9 @@ def test_alpha_zero_with_model_replay_buffer(
             "load_policies_mapping": {"human": "human"},
             "policies_to_train": ["assistant"],
             "model": "transformer_alpha_zero",
-            "use_per_location_lstm": True,
+            "interleave_lstm": True,
             "use_replay_buffer": True,
+            "num_layers": 4,
             "replay_buffer_storage_unit": "sequences",
             "replay_buffer_size": 100,
             "use_model_replay_buffer": True,
@@ -858,7 +811,8 @@ def test_distill(default_config, default_bc_config, dummy_ppo_checkpoint_fname):
                 "input": rollout_dir,
                 "mask_goal": True,
                 "use_extra_features": False,
-                "use_per_location_lstm": use_lstm,
+                "interleave_lstm": use_lstm,
+                "num_layers": 4,
                 "max_seq_len": 5,
                 "sgd_minibatch_size": 10,
             }

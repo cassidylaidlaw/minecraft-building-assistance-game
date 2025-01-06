@@ -17,7 +17,14 @@ from sacred import SETTINGS, Experiment
 from sacred.observers import FileStorageObserver
 
 import mbag
-from mbag.environment.types import CURRENT_BLOCKS, GOAL_BLOCKS, LAST_INTERACTED
+from mbag.environment.types import (
+    CURRENT_BLOCKS,
+    CURRENT_PLAYER,
+    GOAL_BLOCKS,
+    LAST_INTERACTED,
+    OTHER_PLAYER,
+    PLAYER_LOCATIONS,
+)
 from mbag.evaluation.episode import MbagEpisode
 from mbag.rllib.os_utils import available_cpu_count
 from mbag.rllib.torch_models import MbagTorchModel
@@ -27,7 +34,7 @@ SETTINGS.CONFIG.READ_ONLY_CONFIG = False
 SETTINGS.CONFIG
 
 
-ex = Experiment("evaluate")
+ex = Experiment("evaluate_goal_prediction")
 
 
 @ex.config
@@ -47,6 +54,7 @@ def sacred_config():
 
     evaluate_dir = ""  # noqa: F841
     player_index = 1  # noqa: F841
+    convert_to_assistant_perspective = False  # noqa: F841
 
     experiment_tag = "goal_predictions"  # noqa: F841
     out_dir = os.path.join(evaluate_dir, experiment_tag)  # noqa: F841
@@ -74,6 +82,7 @@ def main(  # noqa: C901
     extra_config_updates: dict,
     evaluate_dir: str,
     player_index: int,
+    convert_to_assistant_perspective: bool,
     minibatch_size: int,
     save_blocks_and_logits: bool,
     observer: FileStorageObserver,
@@ -104,16 +113,46 @@ def main(  # noqa: C901
     episode_results: List[GoalPredictionResult] = []
 
     for episode_index, episode in enumerate(episodes):
+        player_world_obs = np.stack(
+            [obs[player_index][0] for obs in episode.obs_history], axis=0
+        )
+        player_inventory_obs = np.stack(
+            [obs[player_index][1] for obs in episode.obs_history], axis=0
+        )
+        player_timesteps = np.array(
+            [obs[player_index][2] for obs in episode.obs_history]
+        )
+
+        if convert_to_assistant_perspective:
+            assert (
+                len(episode.obs_history[0]) == 1
+            ), "Only single player episodes supported with convert_to_assistant_perspective."
+
+            # Convert player locations and last interacted to the assistant's perspective.
+            player_locations = player_world_obs[:, PLAYER_LOCATIONS]
+            player_locations[player_locations == CURRENT_PLAYER] = OTHER_PLAYER
+            last_interacted = player_world_obs[:, LAST_INTERACTED]
+            last_interacted[last_interacted == CURRENT_PLAYER] = OTHER_PLAYER
+
+            # Add inventory observation for the assistant.
+            player_inventory_obs = np.concatenate(
+                [
+                    np.zeros_like(player_inventory_obs),
+                    player_inventory_obs,
+                ],
+                axis=1,
+            )
+
+        episode_len = len(episode.obs_history)
         episode_batch = SampleBatch(
             {
-                SampleBatch.OBS: np.stack(
+                SampleBatch.OBS: np.concatenate(
                     [
-                        np.concatenate(
-                            [obs_piece.flat for obs_piece in obs[player_index]]
-                        )
-                        for obs in episode.obs_history
+                        player_world_obs.reshape(episode_len, -1),
+                        player_inventory_obs.reshape(episode_len, -1),
+                        player_timesteps[:, None],
                     ],
-                    axis=0,
+                    axis=1,
                 ),
             }
         )

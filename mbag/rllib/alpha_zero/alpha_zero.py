@@ -56,9 +56,11 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
             },
         }
         self.model_train_batch_size: int = self.train_batch_size
+        self.mcts_batch_size: Optional[int] = None
         self.sample_batch_size = 1000
         self.sample_freq = 1
         self.policy_loss_coeff = 1.0
+        self.prev_policy_kl_coeff = 0.0
         self.vf_loss_coeff = 1.0
         self.other_agent_action_predictor_loss_coeff = 1.0
         self.goal_loss_coeff = 1.0
@@ -85,13 +87,16 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
         use_model_replay_buffer=NotProvided,
         model_replay_buffer_config=NotProvided,
         model_train_batch_size=NotProvided,
+        mcts_batch_size=NotProvided,
         sample_freq=NotProvided,
         sample_batch_size=NotProvided,
         policy_loss_coeff=NotProvided,
+        prev_policy_kl_coeff=NotProvided,
         vf_loss_coeff=NotProvided,
         other_agent_action_predictor_loss_coeff=NotProvided,
         goal_loss_coeff=NotProvided,
         prev_goal_kl_coeff=NotProvided,
+        prev_goal_kl_coeff_schedule=NotProvided,
         entropy_coeff=NotProvided,
         entropy_coeff_schedule=NotProvided,
         use_critic=NotProvided,
@@ -116,11 +121,17 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
             model_replay_buffer_config (dict): Config for the model replay buffer.
             model_train_batch_size (int): Number of samples to include in each
                 training batch from the model replay buffer.
+            mcts_batch_size (int): Number of environments to run MCTS over in parallel.
+                If there are more environments than this, then they will be split into
+                batches of this size. If None, then this will be set to the number of
+                environments.
             sample_freq (int): If > 1, then only sample new data every `sample_freq`
                 iterations.
             sample_batch_size (int): Number of samples to include in each
                 training batch.
             policy_loss_coeff (float): Coefficient of the policy loss.
+            prev_policy_kl_coeff (float): Coefficient between the KL of the previous
+                and current policy network output during training.
             vf_loss_coeff (float): Coefficient of the value function loss.
             other_agent_action_predictor_loss_coeff (float): Coefficient of the
                 other agent action predictor loss.
@@ -128,6 +139,8 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
             prev_goal_kl_coeff (float): Coefficient between the KL of the previous
                 goal predictions and the current goal predictions during training
                 (encourages stability of goal predictions).
+            prev_goal_kl_coeff_schedule (float): Schedule for the previous goal KL
+                coefficient.
             entropy_coeff (float): Coefficient of the entropy loss.
             entropy_coeff_schedule (float): Schedule for the entropy
                 coefficient.
@@ -161,12 +174,16 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
             self.model_replay_buffer_config.update(model_replay_buffer_config)
         if model_train_batch_size is not NotProvided:
             self.model_train_batch_size = model_train_batch_size
+        if mcts_batch_size is not NotProvided:
+            self.mcts_batch_size = mcts_batch_size
         if sample_freq is not NotProvided:
             self.sample_freq = sample_freq
         if sample_batch_size is not NotProvided:
             self.sample_batch_size = sample_batch_size
         if policy_loss_coeff is not NotProvided:
             self.policy_loss_coeff = policy_loss_coeff
+        if prev_policy_kl_coeff is not NotProvided:
+            self.prev_policy_kl_coeff = prev_policy_kl_coeff
         if vf_loss_coeff is not NotProvided:
             self.vf_loss_coeff = vf_loss_coeff
         if other_agent_action_predictor_loss_coeff is not NotProvided:
@@ -177,6 +194,8 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
             self.goal_loss_coeff = goal_loss_coeff
         if prev_goal_kl_coeff is not NotProvided:
             self.prev_goal_kl_coeff = prev_goal_kl_coeff
+        if prev_goal_kl_coeff_schedule is not NotProvided:
+            self.prev_goal_kl_coeff_schedule = prev_goal_kl_coeff_schedule
         if entropy_coeff is not NotProvided:
             self.entropy_coeff = entropy_coeff
         if entropy_coeff_schedule is not NotProvided:
@@ -573,6 +592,7 @@ class MbagAlphaZero(AlphaZero, KLRegularizationMixin):
                             policy_train_batch.as_multi_agent(),
                             model_train_batch.as_multi_agent(),
                         )
+                        del policy_train_batch, model_train_batch
                     else:
                         train_batch = policy_train_batch
                 else:

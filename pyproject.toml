@@ -16,6 +16,7 @@ dependencies = [
     "types-PyYAML==5.4.3",
     "gymnasium>=0.28",
     "scikit-image>=0.21",
+    "tqdm",
 ]
 requires-python = ">= 3.8"
 classifiers=[
@@ -65,7 +66,7 @@ rllib = [
     "ray[rllib]==2.7.1",
     "torch>=1.8",
     "sacred==0.8.4",
-    "tqdm",
+    "einops>=0.3.0",
 ]
 malmo = [
     "mbag-malmo>=0.38.0",
