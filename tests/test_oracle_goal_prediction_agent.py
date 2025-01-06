@@ -1,9 +1,10 @@
 import numpy as np
 import pytest
-import torch
 from numpy.testing import assert_allclose
 
 try:
+    import torch
+
     from mbag.agents.oracle_goal_prediction_agent import cross_entropy_loss
 except ImportError:
     pass
