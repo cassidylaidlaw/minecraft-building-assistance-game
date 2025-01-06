@@ -6,6 +6,7 @@ from numpy.testing import assert_allclose
 from mbag.agents.oracle_goal_prediction_agent import cross_entropy_loss
 
 
+@pytest.mark.uses_rllib
 def test_perfect_prediction():
     """Test when predictions are perfect (very high confidence for correct class)"""
     logits = np.array([[100.0, 0.0, 0.0], [0.0, 100.0, 0.0]])
@@ -14,6 +15,7 @@ def test_perfect_prediction():
     assert loss < 1e-3
 
 
+@pytest.mark.uses_rllib
 def test_uniform_prediction():
     """Test when predictions are uniform (equal confidence for all classes)"""
     logits = np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
@@ -23,6 +25,7 @@ def test_uniform_prediction():
     assert_allclose(loss, expected_loss, rtol=1e-5)
 
 
+@pytest.mark.uses_rllib
 def test_binary_classification():
     """Test binary classification case"""
     logits = np.array([[0.6, 0.4], [0.3, 0.7]])
@@ -36,6 +39,7 @@ def test_binary_classification():
     assert_allclose(loss, expected_loss, rtol=1e-5)
 
 
+@pytest.mark.uses_rllib
 def test_numerical_stability():
     """Test numerical stability with very large and very small numbers"""
     logits = np.array([[1000.0, -1000.0], [-1000.0, 1000.0]])
@@ -44,6 +48,7 @@ def test_numerical_stability():
     assert loss < 1e-3
 
 
+@pytest.mark.uses_rllib
 def test_batch_size_one():
     """Test with batch size of 1"""
     logits = np.array([[0.6, 0.4, 0.2]])
@@ -52,6 +57,7 @@ def test_batch_size_one():
     assert isinstance(loss, float)
 
 
+@pytest.mark.uses_rllib
 def test_no_batch_dimension():
     """Test with no batch dimension"""
     logits = np.array([0.6, 0.4, 0.2])
@@ -60,6 +66,7 @@ def test_no_batch_dimension():
     assert isinstance(loss, float)
 
 
+@pytest.mark.uses_rllib
 def test_invalid_target_index():
     """Test input validation for invalid target index"""
     logits = np.array([[0.6, 0.4]])
@@ -68,6 +75,7 @@ def test_invalid_target_index():
         cross_entropy_loss(logits, targets)
 
 
+@pytest.mark.uses_rllib
 @pytest.mark.parametrize("logits_shape", [(10, 2), (100, 5)])
 def test_matches_pytorch(logits_shape):
     """Test that the implementation matches PyTorch for binary classification."""
@@ -87,6 +95,7 @@ def test_matches_pytorch(logits_shape):
     assert_allclose(loss, torch_loss, rtol=1e-5)
 
 
+@pytest.mark.uses_rllib
 def test_matches_pytorch_large_logits():
     """Test against PyTorch implementation with very large logits."""
     logits_np = np.array([[1000.0, -1000.0], [-1000.0, 1000.0]])
@@ -101,6 +110,7 @@ def test_matches_pytorch_large_logits():
     assert_allclose(loss, torch_loss, atol=1e-10)
 
 
+@pytest.mark.uses_rllib
 def test_matches_pytorch_zero_logits():
     """Test against PyTorch implementation with zero logits."""
     logits_np = np.zeros((5, 3))
