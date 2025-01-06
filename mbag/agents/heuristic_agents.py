@@ -14,11 +14,6 @@ from ..environment.types import CURRENT_BLOCKS, GOAL_BLOCKS, BlockLocation, Mbag
 from .action_distributions import MbagActionDistribution
 from .mbag_agent import MbagAgent
 
-try:
-    from .oracle_goal_prediction_agent import OracleGoalPredictionAgent
-except ImportError:
-    OracleGoalPredictionAgent = None
-
 
 class NoopAgent(MbagAgent):
     def get_action_distribution(self, obs: MbagObs) -> np.ndarray:
@@ -416,5 +411,11 @@ ALL_HEURISTIC_AGENTS: Dict[str, Type[MbagAgent]] = {
     "lowest_block": LowestBlockAgent,
     "mirror_builder": MirrorBuildingAgent,
 }
-if OracleGoalPredictionAgent is not None:
+# Try importing and adding the OracleGoalPredictionAgent to the list of heuristic
+# agents. This is needed because this agent uses rllib, which may not be available.
+try:
+    from .oracle_goal_prediction_agent import OracleGoalPredictionAgent
+
     ALL_HEURISTIC_AGENTS["oracle_goal_predictor"] = OracleGoalPredictionAgent
+except ImportError:
+    pass
