@@ -198,8 +198,11 @@ DEFAULT_ASSISTANT_PPO_ENV_VARS = dict(
     GET_RESOURCES_REWARD=0.0,
     GAMMA=0.95,
     HORIZON=500,
+    MODEL="convolutional",
     NUM_LAYERS=6,
     HIDDEN_SIZE=64,
+    DIM_FEEDFORWARD=64,
+    DROPOUT=0,
     NUM_SGD_ITER=3,
     LR=0.0003,
     GRAD_CLIP=10,
@@ -266,8 +269,11 @@ AGENT_TO_PLAY_MODE: Dict[Agent, str] = {
 SPREADSHEET_DATA_SPLIT_MAP = {
     "none": None,
     "alone": "human_alone",
+    "human_alone": "human_alone",
     "with_assistant": "human_with_assistant",
+    "human_with_assistant": "human_with_assistant",
     "both": "combined",
+    "combined": "combined",
 }
 
 
@@ -451,29 +457,34 @@ def make_common_tag(env_vars: dict, algorithm: Algorithm, agent: Agent) -> str:
         tag += f"/vf_scale_{vf_scale}"
 
     ### Model architecture
-    # Transformer
-    tag += f"/model_{env_vars['NUM_LAYERS']}x{env_vars['HIDDEN_SIZE']}"
-    tag += (
-        "/sep_transformer"
-        if env_vars["USE_SEPARATED_TRANSFORMER"]
-        else "/no_sep_transformer"
-    )
-    tag += (
-        f"/dim_feedforward_{env_vars['DIM_FEEDFORWARD']}"
-        f"/num_heads_{env_vars['NUM_HEADS']}"
-        f"/norm_first_{env_vars['NORM_FIRST']}"
-        f"/embedding_size_{env_vars['EMBEDDING_SIZE']}"
-        f"/position_embedding_size_{env_vars['POSITION_EMBEDDING_SIZE']}"
-        f"/position_embedding_angle_{env_vars['POSITION_EMBEDDING_ANGLE']}"
-    )
-    # LSTM
-    use_per_location_stm = env_vars["USE_PER_LOCATION_LSTM"]
-    interleave_lstm = env_vars["INTERLEAVE_LSTM"]
-    assert not (
-        use_per_location_stm and interleave_lstm
-    ), "Cannot use both per-location LSTM and interleaved LSTM"
-    if interleave_lstm:
-        tag += "/interleave_lstm"
+    model = env_vars["MODEL"]
+    if model == "convolutional":
+        tag += f"/conv_{env_vars['NUM_LAYERS']}x{env_vars['HIDDEN_SIZE']}/dropout_{env_vars['DROPOUT']}"
+    elif model == "transformer":
+        tag += f"/transformer_{env_vars['NUM_LAYERS']}x{env_vars['HIDDEN_SIZE']}"
+        tag += (
+            "/sep_transformer"
+            if env_vars["USE_SEPARATED_TRANSFORMER"]
+            else "/no_sep_transformer"
+        )
+        tag += (
+            f"/dim_feedforward_{env_vars['DIM_FEEDFORWARD']}"
+            f"/num_heads_{env_vars['NUM_HEADS']}"
+            f"/norm_first_{env_vars['NORM_FIRST']}"
+            f"/embedding_size_{env_vars['EMBEDDING_SIZE']}"
+            f"/position_embedding_size_{env_vars['POSITION_EMBEDDING_SIZE']}"
+            f"/position_embedding_angle_{env_vars['POSITION_EMBEDDING_ANGLE']}"
+        )
+        # LSTM
+        use_per_location_stm = env_vars["USE_PER_LOCATION_LSTM"]
+        interleave_lstm = env_vars["INTERLEAVE_LSTM"]
+        assert not (
+            use_per_location_stm and interleave_lstm
+        ), "Cannot use both per-location LSTM and interleaved LSTM"
+        if interleave_lstm:
+            tag += "/interleave_lstm"
+    else:
+        raise NotImplementedError(f"Model not supported: {model}")
 
     tag += f"/grad_clip_{env_vars['GRAD_CLIP']}"
 
@@ -510,11 +521,11 @@ def make_common_tag(env_vars: dict, algorithm: Algorithm, agent: Agent) -> str:
             loss_coeff = env_vars[loss_name]
             tag += f"/{loss_name.lower()}_{loss_coeff}"
 
-    # Loss term coefficients that affect pretraining but do not relate to goal prediction.
-    for loss_name in [
-        "VF_LOSS_COEFF",
-        "OTHER_AGENT_ACTION_PREDICTOR_LOSS_COEFF",
-    ]:
+    # Loss term coefficients that affect pretraining but do not relate to goal prediction. Both AlphaZero and PPO use the vf_loss. Only AlphaZero uses the other_agent_action_predictor_loss.
+    loss_names = ["VF_LOSS_COEFF"]
+    if algorithm == "alphazero":
+        loss_names.append("OTHER_AGENT_ACTION_PREDICTOR_LOSS_COEFF")
+    for loss_name in loss_names:
         loss_coeff = env_vars[loss_name]
         tag += f"/{loss_name.lower()}_{loss_coeff}"
 
@@ -1069,18 +1080,22 @@ def validate_env_vars(env_vars: dict, algorithm: Algorithm) -> None:
         * env_vars["NUM_WORKERS"]
         * env_vars["NUM_ENVS_PER_WORKER"]
     )
-    sample_batch_size = env_vars["SAMPLE_BATCH_SIZE"]
-    if sample_batch_size % sample_batch_size_gcf != 0:
-        raise ValueError(
-            f"SAMPLE_BATCH_SIZE ({sample_batch_size}) should be divisible by {sample_batch_size_gcf} to avoid large memory usage."
-        )
+    # sample_batch_size is only used by AlphaZero.
+    if algorithm == "alphazero":
+        sample_batch_size = env_vars["SAMPLE_BATCH_SIZE"]
+        if sample_batch_size % sample_batch_size_gcf != 0:
+            raise ValueError(
+                f"SAMPLE_BATCH_SIZE ({sample_batch_size}) should be divisible by {sample_batch_size_gcf} to avoid large memory usage."
+            )
 
     hidden_size = env_vars["HIDDEN_SIZE"]
-    num_heads = env_vars["NUM_HEADS"]
-    if hidden_size % num_heads != 0:
-        raise ValueError(
-            f"HIDDEN_SIZE ({hidden_size}) should be divisible by NUM_HEADS ({num_heads})"
-        )
+    model = env_vars["MODEL"]
+    if model == "transformer":
+        num_heads = env_vars["NUM_HEADS"]
+        if hidden_size % num_heads != 0:
+            raise ValueError(
+                f"HIDDEN_SIZE ({hidden_size}) should be divisible by NUM_HEADS ({num_heads})"
+            )
 
     batch_mode = env_vars["BATCH_MODE"]
     if (batch_mode == "truncate_episodes") != env_vars[
@@ -2214,7 +2229,7 @@ def get_human_modeling_eval_subdir_name_or_pattern(
 def load_human_model_df() -> pd.DataFrame:
     """Load spreadsheet with human models for comparing AlphaZero assistants."""
     sheet_id = "1TNVQA9KEof014eav_ymHu6T7hEct5Z_Khc-rB9HaTOk"
-    gid = "378689004"
+    gid = "615970647"
     df = pd.read_csv(
         f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&id={sheet_id}&gid={gid}"
     )
@@ -2249,13 +2264,6 @@ def get_bc_to_alphazero_conversion_env_vars_for_human_model_name(
         human_model_checkpoint.exists()
     ), f"Checkpoint {human_model_checkpoint} not found"
 
-    # TODO: delete this block if not needed.
-    # Train data split for the human model.
-    data_split_str = human_model_df["human_data_split"].iloc[0]
-    data_split = SPREADSHEET_DATA_SPLIT_MAP.get(data_split_str)
-    if data_split is None:
-        raise ValueError(f"Invalid data_split {data_split_str}")
-
     # Load the human model training config.
     config_path = human_model_checkpoint.parent / "config.json"
     assert config_path.exists(), f"Config {config_path} not found"
@@ -2269,6 +2277,12 @@ def get_bc_to_alphazero_conversion_env_vars_for_human_model_name(
     }
     bc_to_alphazero_env_vars.update(experiment_config)
     bc_to_alphazero_env_vars["CHECKPOINT"] = str(human_model_checkpoint)
+
+    # Train data split for the human model. This is used when loading metrics for piKL eval runs to know which split the BC model was trained on.
+    data_split_str = human_model_df["human_data_split"].iloc[0]
+    data_split = SPREADSHEET_DATA_SPLIT_MAP.get(data_split_str)
+    if data_split is None:
+        raise ValueError(f"Invalid data_split: {data_split_str}")
     bc_to_alphazero_env_vars["SPLIT"] = data_split
 
     # Experiment tag.
@@ -2665,9 +2679,10 @@ def get_human_eval_env_vars_and_metrics_for_experiment(
                     experiment_config, human_model_df
                 )
             )
-            train_data_split = bc_to_alphazero_env_vars["SPLIT"]
-            test_data_split = bc_to_alphazero_env_vars["TEST_SPLIT"]
             train_tag = bc_to_alphazero_env_vars["TAG"]
+            # Train and test data splits are optional.
+            train_data_split = bc_to_alphazero_env_vars.get("SPLIT")
+            test_data_split = bc_to_alphazero_env_vars.get("TEST_SPLIT")
         else:
             # Set the algorithm to BC to get the environment variables for the BC model that
             # piKL uses.
@@ -2708,7 +2723,7 @@ def get_human_eval_env_vars_and_metrics_for_experiment(
     if goal_eval:
         assert (
             test_data_split == "human_alone"
-        ), f"Goal eval only currently supported for human alone, got {test_data_split}."
+        ), f"Goal eval only currently supported for human_alone data split, got {test_data_split}."
         run_paths_algos_and_val_participant_ids.extend(
             get_validation_experiments(
                 train_tag,
@@ -2718,13 +2733,6 @@ def get_human_eval_env_vars_and_metrics_for_experiment(
                 includes_slurm_job_id=includes_slurm_job_id,
             )
         )
-
-    # TODO: remove debugging.
-    # print("train_tag:", train_tag)
-    # print("run_paths:")
-    # for x in run_paths_algos_and_val_participant_ids:
-    #     print(str(x[0]))
-    # print()
 
     # Filter out runs that have not completed training.
     if require_training_completed:
@@ -2745,6 +2753,7 @@ def get_human_eval_env_vars_and_metrics_for_experiment(
         algorithm,
         val_participant_id,
     ) in run_paths_algos_and_val_participant_ids:
+        # True if goal evaluation, False if human modeling evaluation.
         curr_goal_eval = val_participant_id is None
         curr_human_modeling_eval = not curr_goal_eval
 
@@ -2760,6 +2769,7 @@ def get_human_eval_env_vars_and_metrics_for_experiment(
         if run == "MbagAlphaZero":
             num_simulations = experiment_config["num_simulations"]
             puct_coeff = experiment_config["puct_coefficient"]
+            # puct_coefficient_schedule was implemented on a feature branch but not incorporated into the main branch. Make sure we don't use it.
             puct_coefficient_schedule = experiment_config.get(
                 "puct_coefficient_schedule"
             )
