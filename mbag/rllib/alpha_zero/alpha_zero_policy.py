@@ -238,9 +238,9 @@ class MbagAlphaZeroPolicy(
     ):
         input_dict: Dict[str, Any] = {"obs": obs_batch}
         if prev_action_batch is not None:
-            input_dict["prev_actions"] = prev_action_batch
+            input_dict[SampleBatch.PREV_ACTIONS] = prev_action_batch
         if prev_reward_batch is not None:
-            input_dict["prev_rewards"] = prev_reward_batch
+            input_dict[SampleBatch.PREV_REWARDS] = prev_reward_batch
         for state_index, state_batch in enumerate(state_batches or []):
             input_dict[f"state_in_{state_index}"] = state_batch
         if prev_c_puct is not None:
@@ -309,6 +309,9 @@ class MbagAlphaZeroPolicy(
                 env_obs = self.envs[env_index].set_state(env_state)
             else:
                 env_state, env_obs = self.envs[env_index].set_state_from_obs(env_obs)
+            prev_action: Optional[int] = None
+            if SampleBatch.PREV_ACTIONS in input_dict:
+                prev_action = input_dict[SampleBatch.PREV_ACTIONS][env_index]
             model_state = [
                 input_dict[f"state_in_{state_index}"][env_index]
                 for state_index in range(model_state_len)
@@ -330,6 +333,7 @@ class MbagAlphaZeroPolicy(
                         if PREV_C_PUCT in input_dict
                         else np.nan
                     ),
+                    prev_action=prev_action,
                 )
             )
 

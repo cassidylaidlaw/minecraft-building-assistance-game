@@ -396,38 +396,33 @@ def make_named_configs(ex: Experiment):
         teleportation = False
         inf_blocks = True
 
-        num_training_iters = 100
-        num_workers = 8
-        num_envs_per_worker = 8
+        num_training_iters = 2000
+        num_workers = 16
+        num_envs_per_worker = 16
         max_seq_len = 64
         rollout_fragment_length = max_seq_len
-        sample_batch_size = 64 * rollout_fragment_length
+        sample_batch_size = 16384
+        sample_freq = 4
         # Train batch size is specified in terms of replay_buffer_storage_unit, i.e.,
         # sequences.
         train_batch_size = 256
         use_replay_buffer = True
-        use_model_replay_buffer = True
+        use_model_replay_buffer = False
         replay_buffer_storage_unit = "sequences"
         # Replay buffer capacities are specified in timesteps.
-        replay_buffer_size = 32768
-        model_replay_buffer_size = 131072
-        num_gpus = 0.5
-        num_gpus_per_worker = 0.08
+        replay_buffer_size = 262144
+        num_gpus = 1.0
+        num_gpus_per_worker = 0.12
         num_sgd_iter = 1
         batch_mode = "truncate_episodes"
         model = "convolutional_alpha_zero"
         filter_size = 5
-        hidden_size = 64
+        hidden_channels = 64
         sgd_minibatch_size = 1024
-        use_separated_transformer = True
         num_layers = 8
-        num_heads = 4
         scale_obs = True
         vf_share_layers = True
         vf_scale = 1
-        embedding_size = 16
-        position_embedding_size = 48
-        position_embedding_angle = 10
         interleave_lstm_every = num_layers // 2
 
         num_simulations = 100
@@ -442,7 +437,11 @@ def make_named_configs(ex: Experiment):
         gamma = 0.95
         lr = 0.001
         goal_loss_coeff = 3
-        prev_goal_kl_coeff = 3
+        prev_goal_kl_coeff = 30
+        prev_goal_kl_coeff_schedule = [
+            [0, 0],
+            [2000 * sample_batch_size // sample_freq, prev_goal_kl_coeff],
+        ]
         puct_coefficient = 1.0
         save_freq = 5
         evaluation_num_workers = 0

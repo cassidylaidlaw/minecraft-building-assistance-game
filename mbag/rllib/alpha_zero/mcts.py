@@ -68,6 +68,7 @@ class MbagMCTSNode:
         mcts: "MbagMCTS",
         model_state_in: Sequence[Union[np.ndarray, torch.Tensor]],
         parent: Union["MbagMCTSNode", MbagRootParentNode],
+        prev_action: Optional[int] = None,
         c_puct: float = np.nan,
         obs_for_computing_valid_actions: Optional[MbagObs] = None,
     ):
@@ -158,6 +159,8 @@ class MbagMCTSNode:
                 self.model_state_in = model_state_in
         else:
             self.model_state_in = []
+
+        self.prev_action = prev_action
 
     @property
     def total_value(self):
@@ -505,6 +508,7 @@ class MbagMCTSNode:
                 obs=obs,
                 mcts=self.mcts,
                 model_state_in=self.model_state_out,
+                prev_action=action,
             )
         return self.children[all_actions]
 
@@ -760,12 +764,18 @@ class MbagMCTS(MCTS):
                     for state_index in range(model_state_len)
                 ]
             action_mask = np.stack([leaf.valid_actions for leaf in leaves])
+            prev_actions: Optional[np.ndarray] = None
+            if all(leaf.prev_action is not None for leaf in leaves):
+                prev_actions = np.array([leaf.prev_action for leaf in leaves])
             child_priors: np.ndarray
             values: np.ndarray
             model_state_out: List[Union[np.ndarray, torch.Tensor]]
 
             child_priors, values, model_state_out = self.model.compute_priors_and_value(
-                obs, model_state_in, action_mask=action_mask
+                obs,
+                model_state_in,
+                action_mask=action_mask,
+                prev_actions=prev_actions,
             )
             child_priors = child_priors**self.prior_temperature
             child_priors /= child_priors.sum(axis=1, keepdims=True)

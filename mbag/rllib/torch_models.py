@@ -738,7 +738,9 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
     def _get_prev_blocks_initial_state(self):
         return torch.zeros(self.world_size, dtype=torch.uint8)
 
-    def compute_priors_and_value(self, obs, state_in=[], action_mask=None):
+    def compute_priors_and_value(
+        self, obs, state_in=[], action_mask=None, prev_actions=None
+    ):
         batch_size = len(obs)
         obs = convert_to_torch_tensor(
             np.stack([self.preprocessor.transform(o) for o in obs], axis=0)
@@ -758,6 +760,10 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
         if action_mask is not None:
             action_mask = convert_to_torch_tensor(action_mask)
             input_dict[ACTION_MASK] = action_mask
+
+        if prev_actions is not None:
+            prev_actions = convert_to_torch_tensor(prev_actions)
+            input_dict[SampleBatch.PREV_ACTIONS] = prev_actions
 
         with torch.no_grad():
             logits, state_out = self.forward(
@@ -1146,7 +1152,7 @@ class MbagConvolutionalAlphaZeroModel(
 
 
 ModelCatalog.register_custom_model(
-    "mbag_convolutional_alphazero_model", MbagConvolutionalAlphaZeroModel
+    "mbag_convolutional_alpha_zero_model", MbagConvolutionalAlphaZeroModel
 )
 
 
@@ -1155,7 +1161,7 @@ class MbagUNetAlphaZeroModel(MbagUNetModel, OtherAgentActionPredictorMixin):
 
 
 ModelCatalog.register_custom_model(
-    "mbag_unet_alphazero_model",
+    "mbag_unet_alpha_zero_model",
     MbagUNetAlphaZeroModel,
 )
 
@@ -1712,7 +1718,7 @@ class MbagTransformerAlphaZeroModel(
 
 
 ModelCatalog.register_custom_model(
-    "mbag_transformer_alphazero_model", MbagTransformerAlphaZeroModel
+    "mbag_transformer_alpha_zero_model", MbagTransformerAlphaZeroModel
 )
 
 

@@ -3,7 +3,7 @@ import tempfile
 
 import pytest
 
-from mbag.agents.heuristic_agents import LayerBuilderAgent, NoopAgent, RandomAgent
+from mbag.agents.heuristic_agents import LayerBuilderAgent, NoopAgent
 from mbag.environment.goals.simple import BasicGoalGenerator
 from mbag.evaluation.evaluator import MbagEvaluator
 
@@ -24,7 +24,7 @@ def test_malmo():
             },
         },
         [
-            (NoopAgent, {}),
+            (LayerBuilderAgent, {}),
         ],
     )
     episode_info = evaluator.rollout()

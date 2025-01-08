@@ -62,6 +62,7 @@ def default_alpha_zero_config():
         "goal_generator": "random",
         "use_replay_buffer": False,
         "hidden_size": 64,
+        "hidden_channels": 64,
         "num_simulations": 5,
         "sample_batch_size": 100,
         "train_batch_size": 1,
@@ -838,6 +839,7 @@ def test_pikl(default_config, default_bc_config, default_alpha_zero_config):
             **default_config,
             **default_bc_config,
             **env_configs,
+            "use_prev_action": True,
             "goal_generator": "tutorial",
             "validation_participant_ids": [4],
         }

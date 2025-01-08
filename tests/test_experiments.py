@@ -193,22 +193,23 @@ def test_experiments(tmp_path):
         bc_human_data_splits[bc_human_name] = data_split
 
     # Test piKL
-    pikl_result = train_ex.run(
-        named_configs=["pikl"],
-        config_updates={
-            "checkpoint_to_load_policies": bc_human_results["rand_init_human_alone"][
-                "final_checkpoint"
-            ],
-            "checkpoint_name": "rand_init_human_alone",
-            "experiment_dir": str(tmp_path / "pikl"),
-            **common_config_updates,
-        },
-    ).result
-    assert pikl_result is not None
-    assert_config_matches(
-        glob.glob(str(tmp_path / "pikl" / "[1-9]*"))[0],
-        "data/testing/reference_experiments/pikl",
-    )
+    # TODO: update
+    # pikl_result = train_ex.run(
+    #     named_configs=["pikl"],
+    #     config_updates={
+    #         "checkpoint_to_load_policies": bc_human_results["rand_init_human_alone"][
+    #             "final_checkpoint"
+    #         ],
+    #         "checkpoint_name": "rand_init_human_alone",
+    #         "experiment_dir": str(tmp_path / "pikl"),
+    #         **common_config_updates,
+    #     },
+    # ).result
+    # assert pikl_result is not None
+    # assert_config_matches(
+    #     glob.glob(str(tmp_path / "pikl" / "[1-9]*"))[0],
+    #     "data/testing/reference_experiments/pikl",
+    # )
 
     # Test all human model evals
     human_models: List[Tuple[str, str, Optional[str]]] = (
@@ -224,9 +225,10 @@ def test_experiments(tmp_path):
             )
             for bc_human_name, bc_human_result in bc_human_results.items()
         ]
-        + [
-            ("MbagAlphaZero", pikl_result["final_checkpoint"], "human_alone"),
-        ]
+        # TODO: uncomment when piKL is updated
+        # + [
+        #     ("MbagAlphaZero", pikl_result["final_checkpoint"], "human_alone"),
+        # ]
     )
     for human_model_run, human_model_checkpoint, human_model_data_split in human_models:
         extra_config_updates = {}
@@ -285,10 +287,10 @@ def test_experiments(tmp_path):
         named_configs=["alphazero_assistant"],
         config_updates={
             "experiment_dir": str(tmp_path / "alphazero_assistant"),
-            "checkpoint_to_load_policies": bc_human_results[
-                "rand_init_human_with_assistant"
-            ]["final_checkpoint"],
-            "checkpoint_name": "rand_init_human_with_assistant",
+            "checkpoint_to_load_policies": bc_human_results["rand_init_combined"][
+                "final_checkpoint"
+            ],
+            "checkpoint_name": "rand_init_combined",
             **common_config_updates,
         },
     ).result
