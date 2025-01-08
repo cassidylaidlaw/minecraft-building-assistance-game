@@ -2310,11 +2310,31 @@ def get_human_modeling_eval_dir_pattern(
     return os.path.join(out_parent_dir, subdir)
 
 
+def get_human_data_dir_for_human_modeling_eval(
+    train_split: str, test_split: str
+) -> str:
+    if test_split == "human_alone":
+        if train_split == "human_alone":
+            return "/nas/ucb/cassidy/minecraft-building-assistance-game/data/human_data_cleaned/human_alone/infinite_blocks_true/rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_0_inventory_0"
+        elif train_split == "human_with_assistant" or train_split == "combined":
+            return "/nas/ucb/cassidy/minecraft-building-assistance-game/data/human_data_cleaned/human_alone/infinite_blocks_true/rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_0_inventory_0_1"
+    elif test_split == "human_with_assistant":
+        if train_split == "human_alone":
+            return "/nas/ucb/cassidy/minecraft-building-assistance-game/data/human_data_cleaned/human_with_assistant/infinite_blocks_true/rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_1_inventory_1"
+        elif train_split == "human_with_assistant" or train_split == "combined":
+            return "/nas/ucb/cassidy/minecraft-building-assistance-game/data/human_data_cleaned/human_with_assistant/infinite_blocks_true/rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_1_inventory_0_1"
+
+    raise ValueError(
+        f"Invalid train_split {train_split} and test_split {test_split} for human modeling eval."
+    )
+
+
 def get_human_modeling_eval_env_vars_and_metrics(
     checkpoint_dir: pathlib.Path,
     experiment_tag: str,
     val_participant_id: Optional[int],
     repeat_eval_if_exists: bool,
+    train_data_split: str,
     test_data_split: str,
     inf_blocks: str,
     run: str,
@@ -2338,6 +2358,8 @@ def get_human_modeling_eval_env_vars_and_metrics(
     evaluate_run_fnames = glob.glob(os.path.join(eval_dir_pattern, "*/run.json"))
 
     # Load all of the evaluation metrics (may be multiple runs).
+    # List of (eval_run_fname, run_info, mtime) tuples, where mtime is the time at which
+    # the file was last modified.
     completed_eval_runs = []
     for eval_run_fname in evaluate_run_fnames:
         completed_or_running, status, run_info = is_run_completed_or_running(
@@ -2367,11 +2389,12 @@ def get_human_modeling_eval_env_vars_and_metrics(
 
     # Human modeling evaluation env vars
     if not evaluate_run_exists or repeat_eval_if_exists:
-        human_data_dir = (
-            f"/nas/ucb/cassidy/minecraft-building-assistance-game/data/human_data_cleaned/{test_data_split}/infinite_blocks_{inf_blocks}/"
-            "rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_0"
+        human_data_dir = get_human_data_dir_for_human_modeling_eval(
+            train_data_split, test_data_split
         )
-        assert os.path.exists(human_data_dir), f"Path does not exist: {human_data_dir}"
+        assert os.path.exists(
+            human_data_dir
+        ), f"human_data_dir path does not exist: {human_data_dir}"
 
         env_vars = dict(
             RUN=run,
@@ -2496,18 +2519,22 @@ def get_human_goal_eval_env_vars_and_metrics(
     eval_dir_pattern = get_human_goal_eval_dir_pattern(
         checkpoint_dir, experiment_tag, out_parent_dir=out_parent_dir, timestamp=None
     )
-    # print("goal eval_dir_pattern:", eval_dir_pattern)
     evaluate_dirs = glob.glob(eval_dir_pattern)
     evaluate_run_exists = False
     metrics_fnames_and_mtimes = []
     for evaluate_dir in evaluate_dirs:
-        if os.path.exists(os.path.join(evaluate_dir, "metrics.json")):
+        eval_metrics_paths = list(pathlib.Path(evaluate_dir).rglob("metrics.json"))
+        if len(eval_metrics_paths) > 1:
+            raise ValueError(
+                f"Multiple metrics.json files found in {evaluate_dir}: {[str(p) for p in eval_metrics_paths]}"
+            )
+        if eval_metrics_paths:
             # if evaluate_run_exists:
             #     raise ValueError(
             #         f"Multiple evaluation runs found in {checkpoint_dir}: {evaluate_dirs}"
             #     )
             evaluate_run_exists = True
-            metrics_fname = os.path.join(evaluate_dir, "metrics.json")
+            metrics_fname = eval_metrics_paths[0]
             mtime = os.path.getmtime(evaluate_dir)
             metrics_fnames_and_mtimes.append((metrics_fname, mtime))
         # If the directory was modified in the past two hours but metrics.json
@@ -2869,6 +2896,7 @@ def get_human_eval_env_vars_and_metrics_for_experiment(
                     experiment_tag,
                     val_participant_id,
                     repeat_eval_if_exists,
+                    train_data_split,
                     test_data_split,
                     inf_blocks,
                     run,
