@@ -255,6 +255,7 @@ HUMAN_ALGORITHM_TO_ENV_VARS: Dict[Algorithm, str] = {
     "alphazero": DEFAULT_HUMAN_ALPHAZERO_ENV_VARS,
 }
 
+# TODO: maybe delete this mapping because we should be using the data split rather than the agent type.
 # Mapping from agent type (human or assistant) to the play mode, which is the
 # directory under the run where logs are stored.
 # NOTE: this used to be "self_play" and "cross_play", but is now "1_player" and
@@ -2126,10 +2127,17 @@ def get_most_recent_checkpoint_path(dir_path: Union[str, pathlib.Path]) -> pathl
 def get_validation_experiments(
     train_tag: str,
     algorithm: Algorithm,
-    agent: Agent,
+    num_players: int,
     validation: Optional[str],
     includes_slurm_job_id: bool = True,
 ) -> List[Tuple[pathlib.Path, Algorithm, Optional[int]]]:
+    if num_players == 1:
+        num_players_pattern = "1_player"
+    elif num_players == 2:
+        num_players_pattern = "2_players"
+    else:
+        raise ValueError(f"Invalid number of players: {num_players}")
+
     # Get the paths for the cross-validation runs. The wildcards match [slurm_job_id] (optional),
     # "validation_{validation_participant_id}", timestamp, and sacred_run_id
     # if using leave-one-out validation (i.e., validation = "any" or a
@@ -2149,8 +2157,12 @@ def get_validation_experiments(
     slurm_job_id_pattern = "*" if includes_slurm_job_id else ""
 
     run_paths_pattern = os.path.join(
-        f"{ROOT_DIR}/data/logs/{ALGORITHM_TO_NAME[algorithm]}/{AGENT_TO_PLAY_MODE[agent]}/11x10x10/craftassist/"
-        f"{train_tag}",
+        ROOT_DIR,
+        "data/logs",
+        ALGORITHM_TO_NAME[algorithm],
+        num_players_pattern,
+        "11x10x10/craftassist/",
+        train_tag,
         slurm_job_id_pattern,  # Slurm job ID
         val_pattern,  # Validation participant ID (could be empty)
         "*",  # Timestamp
@@ -2233,7 +2245,13 @@ def load_human_model_df() -> pd.DataFrame:
     df = pd.read_csv(
         f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&id={sheet_id}&gid={gid}"
     )
-    return df.dropna(how="all", subset=["human_model_checkpoint"], inplace=False)
+    df = df.dropna(how="all", subset=["human_model_checkpoint"], inplace=False)
+    return df.astype(
+        {
+            "validation_cross_entropy_human_alone": float,
+            "validation_cross_entropy_human_with_assistant": float,
+        }
+    )
 
 
 def get_bc_to_alphazero_conversion_env_vars_for_human_model_name(
@@ -2535,8 +2553,11 @@ def get_human_goal_eval_env_vars_and_metrics(
             #     )
             evaluate_run_exists = True
             metrics_fname = eval_metrics_paths[0]
-            mtime = os.path.getmtime(evaluate_dir)
-            metrics_fnames_and_mtimes.append((metrics_fname, mtime))
+            eval_run_path = metrics_fname.with_name("run.json")
+            # Add the metrics file and its modification time to the list if the evaluation run is completed.
+            if is_run_completed(eval_run_path):
+                mtime = os.path.getmtime(evaluate_dir)
+                metrics_fnames_and_mtimes.append((metrics_fname, mtime))
         # If the directory was modified in the past two hours but metrics.json
         # does not exist, the run is likely still running.
         elif time.time() - os.path.getmtime(evaluate_dir) < 2 * 60 * 60:
@@ -2629,7 +2650,7 @@ def get_human_eval_env_vars_and_metrics_for_experiment(
     human_modeling_eval: bool = True,
     require_training_completed: bool = True,
     repeat_eval_if_exists: bool = False,
-    human_model_df: pd.DataFrame = None,
+    human_model_df: Optional[pd.DataFrame] = None,
 ) -> Tuple[
     List[Dict[str, Any]],
     List[Dict[str, Any]],
@@ -2738,11 +2759,12 @@ def get_human_eval_env_vars_and_metrics_for_experiment(
     # Get the paths for the cross-validation and no cross-validation runs.
     run_paths_algos_and_val_participant_ids = []
     if human_modeling_eval:
+        num_players = 1 if train_data_split == "human_alone" else 2
         run_paths_algos_and_val_participant_ids.extend(
             get_validation_experiments(
                 train_tag,
                 algorithm,
-                agent,
+                num_players,
                 validation="any",
                 includes_slurm_job_id=includes_slurm_job_id,
             )
@@ -2751,11 +2773,15 @@ def get_human_eval_env_vars_and_metrics_for_experiment(
         assert (
             test_data_split == "human_alone"
         ), f"Goal eval only currently supported for human_alone data split, got {test_data_split}."
+        # NOTE: even if the checkpoint was trained with 2 players, we use num_players=1
+        # for goal evaluation because the test data split is always human_alone, and we
+        # initially saved the results to a path containing "1_player". num_players=1 is
+        # needed to match the path for backwards compatibility.
         run_paths_algos_and_val_participant_ids.extend(
             get_validation_experiments(
                 train_tag,
                 algorithm,
-                agent,
+                num_players=1,
                 validation=None,
                 includes_slurm_job_id=includes_slurm_job_id,
             )
@@ -2954,10 +2980,11 @@ def get_bc_to_alphazero_conversion_env_vars(
     # Get the train tag for the BC checkpoint.
     bc_train_tag = make_train_tag(bc_env_vars, algorithm, agent)
     # Get the training run for the specified validation participation.
+    num_players = 1 if bc_env_vars["SPLIT"] == "human_alone" else 2
     run_paths_algos_and_val_participant_ids = get_validation_experiments(
         bc_train_tag,
         algorithm,
-        agent,
+        num_players,
         validation=bc_env_vars["VALIDATION_PARTICIPANT_IDS"],
     )
     assert (
