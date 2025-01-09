@@ -2130,6 +2130,7 @@ def get_validation_experiments(
     num_players: int,
     validation: Optional[str],
     includes_slurm_job_id: bool = True,
+    most_recent_experiment_per_validation_participant: bool = True,
 ) -> List[Tuple[pathlib.Path, Algorithm, Optional[int]]]:
     if num_players == 1:
         num_players_pattern = "1_player"
@@ -2186,6 +2187,39 @@ def get_validation_experiments(
         run_paths_algos_and_val_participant_ids.append(
             (run_path, algorithm, val_participant_id)
         )
+
+    if most_recent_experiment_per_validation_participant:
+        val_participant_id_to_run_path_algo = {}
+        for (
+            run_path,
+            algo,
+            val_participant_id,
+        ) in run_paths_algos_and_val_participant_ids:
+            if val_participant_id not in val_participant_id_to_run_path_algo:
+                val_participant_id_to_run_path_algo[val_participant_id] = (
+                    run_path,
+                    algo,
+                )
+            else:
+                existing_run_path, existing_algo = val_participant_id_to_run_path_algo[
+                    val_participant_id
+                ]
+                existing_run_datetime = datetime.strptime(
+                    existing_run_path.parts[-3], "%Y-%m-%d_%H-%M-%S"
+                )
+                run_datetime = datetime.strptime(
+                    run_path.parts[-3], "%Y-%m-%d_%H-%M-%S"
+                )
+                if run_datetime > existing_run_datetime:
+                    val_participant_id_to_run_path_algo[val_participant_id] = (
+                        run_path,
+                        algo,
+                    )
+        run_paths_algos_and_val_participant_ids = []
+        for val_participant_id, (run_path, algo) in val_participant_id_to_run_path_algo.items():
+            run_paths_algos_and_val_participant_ids.append(
+                (run_path, algo, val_participant_id)
+            )
 
     return run_paths_algos_and_val_participant_ids
 
@@ -2278,6 +2312,26 @@ def get_bc_to_alphazero_conversion_env_vars_for_human_model_name(
     human_model_checkpoint = pathlib.Path(
         human_model_df["human_model_checkpoint"].iloc[0]
     )
+    # If using leave-one-out validation, get the checkpoint for the validation participant instead of the one trained on all of the participants.
+    validation_participant_ids = experiment_config["VALIDATION_PARTICIPANT_IDS"]
+    if validation_participant_ids is not None:
+        validation_participant_ids = int(validation_participant_ids)
+        checkpoint_dir_name = human_model_checkpoint.stem
+        # Parent directory for the checkpoint trained on the participants leaving out the validation participant.
+        validation_dir = (
+            pathlib.Path(*human_model_checkpoint.parts[:-3])
+            / f"validation_{validation_participant_ids}"
+        )
+        # Pattern: {validation_dir}/{timestamp}/{slurm_job_id}/{checkpoint_dir_name}
+        validation_human_model_checkpoints = list(
+            (validation_dir).rglob(f"*/*/{checkpoint_dir_name}")
+        )
+        assert len(validation_human_model_checkpoints) == 1, (
+            f"Expected 1 validation checkpoint for {human_model_checkpoint}, "
+            f"got {len(validation_human_model_checkpoints)}: {validation_human_model_checkpoints}"
+        )
+        human_model_checkpoint = validation_human_model_checkpoints[0]
+
     assert (
         human_model_checkpoint.exists()
     ), f"Checkpoint {human_model_checkpoint} not found"
