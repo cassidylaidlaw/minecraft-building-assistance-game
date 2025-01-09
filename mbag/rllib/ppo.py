@@ -37,10 +37,7 @@ from mbag.environment.blocks import MinecraftBlocks
 from mbag.environment.types import GOAL_BLOCKS
 
 from .kl_regularization import ANCHOR_POLICY_ACTION_DIST_INPUTS, KLRegularizationMixin
-from .torch_action_distributions import (
-    MbagAutoregressiveActionDistribution,
-    MbagBilevelCategorical,
-)
+from .torch_action_distributions import MbagBilevelCategorical
 from .torch_models import ACTION_MASK, MbagTorchModel, OptimizerMixinV2
 
 logger = logging.getLogger(__name__)
@@ -186,13 +183,19 @@ class MbagPPOTorchPolicy(OptimizerMixinV2, PPOTorchPolicy):
             logger.warn("recomputing logits in place_block_loss")
             logits, state = model(train_batch)
 
+        placeable_block_mask = torch.tensor(
+            [
+                block_id in MinecraftBlocks.PLACEABLE_BLOCK_IDS
+                for block_id in range(len(MinecraftBlocks.ID2NAME))
+            ],
+            device=self.device,
+        )
+
         # We only care about place block actions at places where there are blocks in the
         # goal.
         place_block_mask = ~torch.any(
             goal_block_ids[..., None]
-            == MbagAutoregressiveActionDistribution.PLACEABLE_BLOCK_MASK[
-                None, None, None, None, :
-            ].to(self.device),
+            == placeable_block_mask[None, None, None, None, :].to(self.device),
             dim=4,
         ).flatten()
 

@@ -1118,7 +1118,7 @@
               "use_resnet": true,
               "vf_scale": 1.0
             },
-            "max_seq_len": 511,
+            "max_seq_len": 64,
             "vf_share_layers": true
           }
         },

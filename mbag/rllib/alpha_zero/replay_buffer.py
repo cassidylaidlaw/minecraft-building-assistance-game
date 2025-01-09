@@ -131,6 +131,7 @@ class FixedMultiAgentReplayBuffer(MultiAgentReplayBuffer):
     ) -> None:
         if self.storage_unit is not StorageUnit.SEQUENCES:
             super()._add_to_underlying_buffer(policy_id, batch, **kwargs)
+            return
 
         # Merge kwargs, overwriting standard call arguments
         kwargs = merge_dicts_with_warning(self.underlying_buffer_call_args, kwargs)
