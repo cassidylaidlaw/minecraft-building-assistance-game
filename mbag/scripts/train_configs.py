@@ -254,6 +254,7 @@ def make_named_configs(ex: Experiment):
     @ex.named_config
     def pikl():
         run = "MbagAlphaZero"
+        data_split = "human_alone"
         num_training_iters = 0
         train_batch_size = 10000
         use_extra_features = True
@@ -264,6 +265,7 @@ def make_named_configs(ex: Experiment):
         width = 11
         height = 10
         depth = 10
+        num_players = 1 if data_split == "human_alone" else 2
         gamma = 0.95
         model = "convolutional"
         filter_size = 5
@@ -280,12 +282,12 @@ def make_named_configs(ex: Experiment):
         evaluation_explore = True
         scale_obs = True
         load_policies_mapping = {"human": "human"}
-        is_human = [False]
+        is_human = [False] * num_players
         checkpoint_to_load_policies = None
         checkpoint_name = ""
         load_config_from_checkpoint = False
-        num_simulations = 100
-        puct_coefficient = 10
+        num_simulations = 30
+        puct_coefficient = 30
         sample_c_puct_every_timestep = True
         add_dirichlet_noise = False
         argmax_tree_policy = False
