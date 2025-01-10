@@ -116,6 +116,9 @@ class MbagAlphaZeroPolicy(
             # the goal is completed because that leaks information about the goal.
             if self.mcts.use_goal_predictor:
                 env_config["terminate_on_goal_completion"] = False
+            # In case we're being fed observations from Malmo or from human data where
+            # players might be overlapping.
+            env_config["_check_for_overlapping_players"] = False
             env = env_creator(env_config)
             env_model = MbagEnvModel(
                 env,

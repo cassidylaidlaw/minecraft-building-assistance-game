@@ -940,7 +940,7 @@ class MbagEnv(object):
         # Add locations to the observation if the locations are actually meaningful
         # (i.e., if players do not have teleportation abilities).
         if not self.config["abilities"]["teleportation"]:
-            check_for_overlap = not (
+            check_for_overlap = self.config["_check_for_overlapping_players"] and not (
                 self.config["malmo"]["use_malmo"]
                 or any(
                     player_config["is_human"]
@@ -1024,9 +1024,8 @@ class MbagEnv(object):
             else [y_feet]
         ):
             if check_for_overlap:
-                assert (
-                    world_obs[PLAYER_LOCATIONS, x, y, z] == 0
-                ), "players are overlapping"
+                if world_obs[PLAYER_LOCATIONS, x, y, z] != 0:
+                    raise PlayersOverlappingError()
             world_obs[PLAYER_LOCATIONS, x, y, z] = marker
 
     def _get_reward(
@@ -1271,3 +1270,7 @@ class MbagEnv(object):
             self._get_player_obs(player_index)
             for player_index in range(self.config["num_players"])
         ]
+
+
+class PlayersOverlappingError(Exception):
+    pass

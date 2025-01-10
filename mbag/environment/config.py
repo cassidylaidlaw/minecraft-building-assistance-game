@@ -223,6 +223,14 @@ class MbagConfigDict(TypedDict, total=False):
     maximum.
     """
 
+    _check_for_overlapping_players: bool
+    """
+    This should always be set to True except in certain cases where planning needs to
+    be done given an environment state that has overlapping players, e.g., if evaluating
+    the cross entropy of an MCTS-based policy on human data that contains overlapping
+    players.
+    """
+
 
 DEFAULT_PLAYER_CONFIG: MbagPlayerConfigDict = {
     "player_name": None,
@@ -242,6 +250,7 @@ DEFAULT_CONFIG: MbagConfigDict = {
     "randomize_first_episode_length": False,
     "terminate_on_goal_completion": True,
     "truncate_on_no_progress_timesteps": None,
+    "_check_for_overlapping_players": True,
     "goal_generator": TransformedGoalGenerator,
     "goal_generator_config": {
         "goal_generator": "random",
