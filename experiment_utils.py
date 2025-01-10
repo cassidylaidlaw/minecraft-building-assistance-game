@@ -31,9 +31,8 @@ DEFAULT_HUMAN_BC_ENV_VARS = dict(
     # GAMMA=0.95,
     # ENTROPY=0,
     NUM_LAYERS=6,
-    HIDDEN_SIZE=64,
+    HIDDEN_CHANNELS=64,
     # USE_SEPARATED_TRANSFORMER=True,
-    # USE_PER_LOCATION_LSTM=False,
     INTERLEAVE_LSTM=False,
     # NUM_SGD_ITER=1,
     # SGD_MINIBATCH_SIZE=128,
@@ -81,7 +80,7 @@ DEFAULT_HUMAN_ALPHAZERO_ENV_VARS = dict(
     TRAIN_BATCH_SIZE=8,
     NUM_SGD_ITER=1,
     NUM_TRAINING_ITERS=2000,
-    HIDDEN_SIZE=64,
+    HIDDEN_CHANNELS=64,
     NUM_LAYERS=6,
     NUM_WORKERS=8,
     NUM_ENVS_PER_WORKER=8,
@@ -96,7 +95,6 @@ DEFAULT_HUMAN_ALPHAZERO_ENV_VARS = dict(
     REPLAY_BUFFER_SIZE=20,
     USE_REPLAY_BUFFER=True,
     USE_SEPARATED_TRANSFORMER=True,
-    USE_PER_LOCATION_LSTM=True,
     INTERLEAVE_LSTM=False,
     PRETRAIN=False,
     SEED=0,
@@ -134,7 +132,7 @@ DEFAULT_ASSISTANT_ALPHAZERO_ENV_VARS = dict(
     WEIGHT_DECAY=0,
     GRAD_CLIP=10,
     NUM_LAYERS=6,
-    HIDDEN_SIZE=64,
+    HIDDEN_CHANNELS=64,
     NUM_HEADS=4,
     NORM_FIRST=False,
     EMBEDDING_SIZE=16,
@@ -168,7 +166,6 @@ DEFAULT_ASSISTANT_ALPHAZERO_ENV_VARS = dict(
     GOAL_LOSS_COEFF=3,
     OTHER_AGENT_ACTION_PREDICTOR_LOSS_COEFF=1.0,
     USE_SEPARATED_TRANSFORMER=True,
-    USE_PER_LOCATION_LSTM=False,
     INTERLEAVE_LSTM=True,
     # Optional env vars. These are set to None and then converted to empty
     # strings for the shell command, which makes the env var unset.
@@ -182,31 +179,32 @@ DEFAULT_ASSISTANT_ALPHAZERO_ENV_VARS = dict(
 )
 
 # Default PPO parameters based on Cassidy's training command:
-# CLIP=0.2 LAMBDA=0.95 ROLLOUT_FRAGMENT_LENGTH=512 NUM_SGD_ITER=3 LR=0.0003 ENTROPY_COEFF=0.01 ENTROPY_HORIZON=2e6 VF_LOSS_COEFF=0.01 OWN_REWARD_PROP=1 PLACE_BLOCK_LOSS_COEFF=1 PLACE_BLOCK_LOSS_HORIZON=2e6 HORIZON=500 MAX_SEQ_LEN=512 BATCH_MODE=truncate_episodes NUM_WORKERS=8 GAMMA=0.98 GOAL_LOSS_COEFF=0.5 HUMAN_ACTION_PENALTY=0 NUM_LAYERS=6 HIDDEN_SIZE=64 NUM_GPUS_PER_WORKER=0.07 HEURISTIC=lowest_block TELEPORTATION=True sbatch scripts/slurm_ppo_assistant.sh
+# CLIP_PARAM=0.2 LAMBDA=0.95 ROLLOUT_FRAGMENT_LENGTH=512 NUM_SGD_ITER=3 LR=0.0003 ENTROPY_COEFF_END=0.01 ENTROPY_COEFF_HORIZON=2e6 VF_LOSS_COEFF=0.01 OWN_REWARD_PROP=1 PLACE_BLOCK_LOSS_COEFF=1 PLACE_BLOCK_LOSS_HORIZON=2e6 HORIZON=500 MAX_SEQ_LEN=512 BATCH_MODE=truncate_episodes NUM_WORKERS=8 GAMMA=0.98 GOAL_LOSS_COEFF=0.5 HUMAN_ACTION_PENALTY=0 NUM_LAYERS=6 HIDDEN_CHANNELS=64 NUM_GPUS_PER_WORKER=0.07 HEURISTIC=lowest_block TELEPORTATION=True sbatch scripts/slurm_ppo_assistant.sh
 DEFAULT_ASSISTANT_PPO_ENV_VARS = dict(
     SEED=0,
-    NUM_WORKERS=8,
-    NUM_ENVS_PER_WORKER=8,
+    NUM_WORKERS=16,
+    NUM_ENVS_PER_WORKER=16,
     NUM_TRAINING_ITERS=10000,
     NUM_GPUS_PER_WORKER=0.07,
     TELEPORTATION=False,
     PLACE_BLOCK_LOSS_COEFF=1,
     PLACE_BLOCK_LOSS_HORIZON=int(2e6),
-    ENTROPY_HORIZON=int(2e6),
-    ENTROPY_COEFF=0.01,
+    ENTROPY_COEFF_HORIZON=2_000_000,
+    ENTROPY_COEFF_START=1,
+    ENTROPY_COEFF_END=0.01,
     NOOP_REWARD=0.0,
     GET_RESOURCES_REWARD=0.0,
     GAMMA=0.95,
-    HORIZON=500,
+    HORIZON=1500,
     MODEL="convolutional",
-    NUM_LAYERS=6,
-    HIDDEN_SIZE=64,
+    NUM_LAYERS=8,
+    HIDDEN_CHANNELS=64,
     DIM_FEEDFORWARD=64,
     DROPOUT=0,
     NUM_SGD_ITER=3,
     LR=0.0003,
     GRAD_CLIP=10,
-    CLIP=0.2,
+    CLIP_PARAM=0.2,
     LAMBDA=0.95,
     REWARD_SCALE=1.0,
     VF_LOSS_COEFF=0.01,
@@ -214,13 +212,12 @@ DEFAULT_ASSISTANT_PPO_ENV_VARS = dict(
     KL_TARGET=0.01,
     BATCH_MODE="truncate_episodes",
     RANDOMIZE_FIRST_EPISODE_LENGTH=True,
-    ROLLOUT_FRAGMENT_LENGTH=256,
-    MAX_SEQ_LEN=256,
-    GOAL_LOSS_COEFF=0.5,
+    ROLLOUT_FRAGMENT_LENGTH=64,
+    MAX_SEQ_LEN=64,
+    SGD_MINIBATCH_SIZE=256,
+    GOAL_LOSS_COEFF=30,
     OWN_REWARD_PROP=1,
-    SGD_MINIBATCH_SIZE=512,
     USE_SEPARATED_TRANSFORMER=True,
-    USE_PER_LOCATION_LSTM=True,
     INTERLEAVE_LSTM=False,
     PRETRAIN=False,
     # Optional env vars. These are set to None and then converted to empty
@@ -366,7 +363,7 @@ def make_alphazero_from_bc_tag(env_vars: dict, human_model_name: Optional[str]) 
             env_vars, human_model_name
         )
 
-    tag = f"bc_to_az/teleportation_{env_vars['TELEPORTATION']}/inf_blocks_{env_vars['INF_BLOCKS']}/split_{env_vars['SPLIT']}/model_{env_vars['NUM_LAYERS']}x{env_vars['HIDDEN_SIZE']}"
+    tag = f"bc_to_az/teleportation_{env_vars['TELEPORTATION']}/inf_blocks_{env_vars['INF_BLOCKS']}/split_{env_vars['SPLIT']}/model_{env_vars['NUM_LAYERS']}x{env_vars['HIDDEN_CHANNELS']}"
 
     lr = env_vars.get("LR")
     if lr is not None:
@@ -460,9 +457,9 @@ def make_common_tag(env_vars: dict, algorithm: Algorithm, agent: Agent) -> str:
     ### Model architecture
     model = env_vars["MODEL"]
     if model == "convolutional":
-        tag += f"/conv_{env_vars['NUM_LAYERS']}x{env_vars['HIDDEN_SIZE']}/dropout_{env_vars['DROPOUT']}"
+        tag += f"/conv_{env_vars['NUM_LAYERS']}x{env_vars['HIDDEN_CHANNELS']}/dropout_{env_vars['DROPOUT']}"
     elif model == "transformer":
-        tag += f"/transformer_{env_vars['NUM_LAYERS']}x{env_vars['HIDDEN_SIZE']}"
+        tag += f"/transformer_{env_vars['NUM_LAYERS']}x{env_vars['HIDDEN_CHANNELS']}"
         tag += (
             "/sep_transformer"
             if env_vars["USE_SEPARATED_TRANSFORMER"]
@@ -477,11 +474,7 @@ def make_common_tag(env_vars: dict, algorithm: Algorithm, agent: Agent) -> str:
             f"/position_embedding_angle_{env_vars['POSITION_EMBEDDING_ANGLE']}"
         )
         # LSTM
-        use_per_location_stm = env_vars["USE_PER_LOCATION_LSTM"]
         interleave_lstm = env_vars["INTERLEAVE_LSTM"]
-        assert not (
-            use_per_location_stm and interleave_lstm
-        ), "Cannot use both per-location LSTM and interleaved LSTM"
         if interleave_lstm:
             tag += "/interleave_lstm"
     else:
@@ -541,9 +534,9 @@ def make_common_tag(env_vars: dict, algorithm: Algorithm, agent: Agent) -> str:
         place_block_loss_coeff = env_vars["PLACE_BLOCK_LOSS_COEFF"]
         if place_block_loss_coeff != 0:
             tag += f"/place_block_loss_{place_block_loss_coeff}-0_{env_vars['PLACE_BLOCK_LOSS_HORIZON']}"
-        tag += f"/entropy_1-{env_vars['ENTROPY_COEFF']}_{env_vars['ENTROPY_HORIZON']}"
+        tag += f"/entropy_{env_vars['ENTROPY_COEFF_START']}-{env_vars['ENTROPY_COEFF_END']}_{env_vars['ENTROPY_COEFF_HORIZON']}"
 
-        tag += f"/{env_vars['NUM_SGD_ITER']}_sgd_iter/clip_{env_vars['CLIP']}/vf_loss_{env_vars['VF_LOSS_COEFF']}/kl_target_{env_vars['KL_TARGET']}/seed_{env_vars['SEED']}"
+        tag += f"/{env_vars['NUM_SGD_ITER']}_sgd_iter/clip_{env_vars['CLIP_PARAM']}/vf_loss_{env_vars['VF_LOSS_COEFF']}/kl_target_{env_vars['KL_TARGET']}/seed_{env_vars['SEED']}"
 
     # Initialize from checkpoint. Only AlphaZero assistants are initialized from
     # a checkpoint by default. For other types of agents, if a checkpoint is
@@ -654,7 +647,6 @@ def set_assistant_specific_env_vars(
         env_vars["TELEPORTATION"] = False
         env_vars["HUMAN_CHECKPOINT"] = human_model_row["human_model_checkpoint"]
         env_vars["HUMAN_TAG"] = human_model_row["human_model_name"]
-        env_vars["INF_BLOCKS"] = human_model_row["inf_blocks"]
 
     if "HUMAN_ACTION_PENALTY" in env_vars:
         if "PER_PLAYER_ACTION_REWARD" in experiment_config:
@@ -1089,13 +1081,13 @@ def validate_env_vars(env_vars: dict, algorithm: Algorithm) -> None:
                 f"SAMPLE_BATCH_SIZE ({sample_batch_size}) should be divisible by {sample_batch_size_gcf} to avoid large memory usage."
             )
 
-    hidden_size = env_vars["HIDDEN_SIZE"]
+    hidden_size = env_vars["HIDDEN_CHANNELS"]
     model = env_vars["MODEL"]
     if model == "transformer":
         num_heads = env_vars["NUM_HEADS"]
         if hidden_size % num_heads != 0:
             raise ValueError(
-                f"HIDDEN_SIZE ({hidden_size}) should be divisible by NUM_HEADS ({num_heads})"
+                f"HIDDEN_CHANNELS ({hidden_size}) should be divisible by NUM_HEADS ({num_heads})"
             )
 
     batch_mode = env_vars["BATCH_MODE"]
@@ -1137,13 +1129,13 @@ def make_extra_slurm_args(env_vars: dict, algorithm: Algorithm) -> str:
 
     # If the model is large, run on machines with A100 GPUs.
     num_layers = env_vars["NUM_LAYERS"]
-    hidden_size = env_vars["HIDDEN_SIZE"]
+    hidden_size = env_vars["HIDDEN_CHANNELS"]
     interleave_lstm = env_vars["INTERLEAVE_LSTM"]
     use_separated_transformer = env_vars["USE_SEPARATED_TRANSFORMER"]
     if (
         use_separated_transformer
         and (interleave_lstm and num_layers > 8)
-        or (not interleave_lstm and (num_layers > 6 or hidden_size > 64))
+        or (not interleave_lstm and (num_layers > 8 or hidden_size > 64))
     ) or (not use_separated_transformer and num_layers >= 6):
         extra_slurm_args.append(a100_nodelist)
     else:
@@ -1486,7 +1478,13 @@ def get_policy_config_subsets(config: Dict) -> List[Dict]:
         policy_config_subset = {}
         # Model
         policy_model_config = policy_config["model"]["custom_model_config"]
-        for key in ["num_layers", "hidden_size", "line_of_sight_masking", "scale_obs"]:
+        for key in [
+            "num_layers",
+            "hidden_channels",
+            "hidden_size",
+            "line_of_sight_masking",
+            "scale_obs",
+        ]:
             policy_config_subset[key] = policy_model_config.get(key)
         # Environment
         policy_config_subset.update(
@@ -1526,6 +1524,7 @@ def get_result_subset(result: Dict, agent: Agent) -> Dict:
     ]:
         config[key] = result_config.get(key)
 
+    # TODO: update this to work with convolutional models as well.
     config["hidden_size"] = result_config["model"].get("attention_dim")
     config.update(result_config.get("mcts_config", {}))
 
@@ -2216,7 +2215,10 @@ def get_validation_experiments(
                         algo,
                     )
         run_paths_algos_and_val_participant_ids = []
-        for val_participant_id, (run_path, algo) in val_participant_id_to_run_path_algo.items():
+        for val_participant_id, (
+            run_path,
+            algo,
+        ) in val_participant_id_to_run_path_algo.items():
             run_paths_algos_and_val_participant_ids.append(
                 (run_path, algo, val_participant_id)
             )
@@ -2345,7 +2347,13 @@ def get_bc_to_alphazero_conversion_env_vars_for_human_model_name(
     # Make the environment variables for the BC to AlphaZero experiment.
     bc_to_alphazero_env_vars = {
         key.upper(): config[key]
-        for key in ["teleportation", "inf_blocks", "num_layers", "hidden_size"]
+        for key in [
+            "teleportation",
+            "inf_blocks",
+            "num_layers",
+            "hidden_channels",
+            "hidden_size",
+        ]
     }
     bc_to_alphazero_env_vars.update(experiment_config)
     bc_to_alphazero_env_vars["CHECKPOINT"] = str(human_model_checkpoint)
@@ -3056,7 +3064,7 @@ def get_bc_to_alphazero_conversion_env_vars(
         )
         bc_to_alphazero_env_vars = {
             key: bc_env_vars[key]
-            for key in ["TELEPORTATION", "INF_BLOCKS", "NUM_LAYERS", "HIDDEN_SIZE"]
+            for key in ["TELEPORTATION", "INF_BLOCKS", "NUM_LAYERS", "HIDDEN_CHANNELS"]
         }
         # Optional arguments
         for key in ["NUM_SIMULATIONS", "PUCT_COEFFICIENT", "PUCT_COEFFICIENT_SCHEDULE"]:
