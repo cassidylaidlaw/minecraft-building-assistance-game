@@ -184,8 +184,7 @@ DEFAULT_ASSISTANT_PPO_ENV_VARS = dict(
     SEED=0,
     NUM_WORKERS=16,
     NUM_ENVS_PER_WORKER=16,
-    NUM_TRAINING_ITERS=10000,
-    NUM_GPUS_PER_WORKER=0.07,
+    NUM_TRAINING_ITERS=100,
     TELEPORTATION=False,
     PLACE_BLOCK_LOSS_COEFF=1,
     PLACE_BLOCK_LOSS_HORIZON=int(2e6),
@@ -216,6 +215,7 @@ DEFAULT_ASSISTANT_PPO_ENV_VARS = dict(
     MAX_SEQ_LEN=64,
     SGD_MINIBATCH_SIZE=256,
     GOAL_LOSS_COEFF=30,
+    PREV_GOAL_KL_COEFF=0,
     OWN_REWARD_PROP=1,
     USE_SEPARATED_TRANSFORMER=True,
     INTERLEAVE_LSTM=False,
@@ -506,8 +506,14 @@ def make_common_tag(env_vars: dict, algorithm: Algorithm, agent: Agent) -> str:
             tag += f"/per_player_action_reward_{human_action_reward}_{assistant_action_reward}"
 
     # Goal predictor
-    if env_vars.get("USE_GOAL_PREDICTOR"):
-        tag += f"/prev_goal_kl_{env_vars['PREV_GOAL_KL_COEFF']}"
+    if env_vars.get("USE_GOAL_PREDICTOR") or (
+        algorithm == "ppo" and agent == "assistant"
+    ):
+        prev_goal_kl_coeff = env_vars["PREV_GOAL_KL_COEFF"]
+        if algorithm == "ppo" and agent == "assistant" and prev_goal_kl_coeff != 0:
+            tag += f"/prev_goal_kl_schedule_0_0-2000000_{prev_goal_kl_coeff}"
+        else:
+            tag += f"/prev_goal_kl_{prev_goal_kl_coeff}"
         # Loss term coefficients that affect pretraining and relate to goal prediction.
         for loss_name in [
             "GOAL_LOSS_COEFF",
@@ -1119,8 +1125,6 @@ def make_extra_slurm_args(env_vars: dict, algorithm: Algorithm) -> str:
                 mem = "145GB"
             else:
                 mem = "200GB"
-        elif algorithm == "ppo" and env_vars["NUM_LAYERS"] > 6:
-            mem = "200GB"
     if mem is not None:
         extra_slurm_args.append(f"--mem={mem}")
 
@@ -1133,10 +1137,14 @@ def make_extra_slurm_args(env_vars: dict, algorithm: Algorithm) -> str:
     interleave_lstm = env_vars["INTERLEAVE_LSTM"]
     use_separated_transformer = env_vars["USE_SEPARATED_TRANSFORMER"]
     if (
-        use_separated_transformer
-        and (interleave_lstm and num_layers > 8)
-        or (not interleave_lstm and (num_layers > 8 or hidden_size > 64))
-    ) or (not use_separated_transformer and num_layers >= 6):
+        algorithm == "alphazero"
+        and (
+            use_separated_transformer
+            and (interleave_lstm and num_layers > 8)
+            or (not interleave_lstm and (num_layers > 6 or hidden_size > 64))
+        )
+        or (not use_separated_transformer and num_layers >= 6)
+    ):
         extra_slurm_args.append(a100_nodelist)
     else:
         # Otherwise, exclude machines with small GPUs. --exclude seems to be
@@ -2200,7 +2208,7 @@ def get_validation_experiments(
                     algo,
                 )
             else:
-                existing_run_path, existing_algo = val_participant_id_to_run_path_algo[
+                existing_run_path, _ = val_participant_id_to_run_path_algo[
                     val_participant_id
                 ]
                 existing_run_datetime = datetime.strptime(
@@ -2274,6 +2282,15 @@ def get_human_modeling_eval_subdir_name_or_pattern(
     return f"evaluate_human_modeling_{experiment_tag}_participants_{participant_ids_str}_{timestamp}"
 
 
+# Mapping from the most up-to-date human_model_name in the data returned by
+# load_human_model_df to the human_model_name used for saving results. This is needed
+# when the human_model_name is updated in the spreadsheet after results have already
+# been saved.
+HUMAN_MODEL_NAME_MAP = {
+    "bc_combined_prev_action_20250106_40": "bc_combined_lr_prev_action_20250106_40"
+}
+
+
 def load_human_model_df() -> pd.DataFrame:
     """Load spreadsheet with human models for comparing AlphaZero assistants."""
     sheet_id = "1TNVQA9KEof014eav_ymHu6T7hEct5Z_Khc-rB9HaTOk"
@@ -2314,6 +2331,10 @@ def get_bc_to_alphazero_conversion_env_vars_for_human_model_name(
     human_model_checkpoint = pathlib.Path(
         human_model_df["human_model_checkpoint"].iloc[0]
     )
+
+    # Map the human model name to the name used for saving results.
+    human_model_name = HUMAN_MODEL_NAME_MAP.get(human_model_name, human_model_name)
+
     # If using leave-one-out validation, get the checkpoint for the validation participant instead of the one trained on all of the participants.
     validation_participant_ids = experiment_config["VALIDATION_PARTICIPANT_IDS"]
     if validation_participant_ids is not None:
