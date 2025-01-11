@@ -531,9 +531,6 @@ def make_common_tag(env_vars: dict, algorithm: Algorithm, agent: Agent) -> str:
 
     # PPO-specific rewards
     if algorithm == "ppo":
-        goal_loss_coeff = env_vars["GOAL_LOSS_COEFF"]
-        if goal_loss_coeff != 0.5:
-            tag += f"/goal_loss_{goal_loss_coeff}"
         own_reward_prop = env_vars["OWN_REWARD_PROP"]
         if own_reward_prop != 0:
             tag += f"/own_reward_prop_{format_reward(own_reward_prop)}"
