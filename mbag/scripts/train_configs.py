@@ -341,7 +341,7 @@ def make_named_configs(ex: Experiment):
         num_workers = 16
         num_envs_per_worker = 16
         num_gpus = 0.5
-        num_gpus_per_worker = 0.07
+        num_gpus_per_worker = 0.7 / max(num_workers, 1)
         lr = 0.0003
         kl_target = 0.01
         num_sgd_iter = 3
@@ -367,6 +367,11 @@ def make_named_configs(ex: Experiment):
         reward_scale = 1.0
         custom_action_dist = "mbag_bilevel_categorical"
         goal_loss_coeff = 30
+        prev_goal_kl_coeff = 0
+        prev_goal_kl_coeff_schedule = [
+            [0, 0],
+            [2_000_000, prev_goal_kl_coeff],
+        ]
         mask_goal = True
         interleave_lstm_every = num_layers // 2
         policies_to_train = ["assistant"]

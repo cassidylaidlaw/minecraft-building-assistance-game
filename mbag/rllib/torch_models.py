@@ -183,6 +183,7 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
 
     _logits: torch.Tensor
     _mask: torch.Tensor
+    _goal_preds: torch.Tensor
 
     def __init__(
         self,
@@ -674,8 +675,11 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
                 self.env_config, self._logits
             )
 
+            self._goal_preds = self.goal_head(self._backbone_out)
+
         self._logits = self._logits.float()
         self._flat_logits = self._flat_logits.float()
+        self._goal_preds = self._goal_preds.float()
         state = [state_var.float() for state_var in state]
 
         if self.use_prev_blocks:
@@ -716,9 +720,7 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
         return vf.float() * self.vf_scale
 
     def goal_predictor(self) -> torch.Tensor:
-        with self._amp_or_nothing:
-            goal_preds: torch.Tensor = self.goal_head(self._backbone_out)
-        return goal_preds.float()
+        return self._goal_preds
 
     def get_initial_state(self):
         state: List[TensorType]
