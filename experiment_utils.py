@@ -216,9 +216,11 @@ DEFAULT_ASSISTANT_PPO_ENV_VARS = dict(
     SGD_MINIBATCH_SIZE=256,
     GOAL_LOSS_COEFF=30,
     PREV_GOAL_KL_COEFF=0,
+    PREV_GOAL_KL_COEFF_HORIZON=2_000_000,
     OWN_REWARD_PROP=1,
     USE_SEPARATED_TRANSFORMER=True,
     INTERLEAVE_LSTM=False,
+    INTERLEAVE_LSTM_EVERY=4,
     PRETRAIN=False,
     # Optional env vars. These are set to None and then converted to empty
     # strings for the shell command, which makes the env var unset.
@@ -457,7 +459,10 @@ def make_common_tag(env_vars: dict, algorithm: Algorithm, agent: Agent) -> str:
     ### Model architecture
     model = env_vars["MODEL"]
     if model == "convolutional":
+        interleave_lstm_every = env_vars["INTERLEAVE_LSTM_EVERY"]
         tag += f"/conv_{env_vars['NUM_LAYERS']}x{env_vars['HIDDEN_CHANNELS']}/dropout_{env_vars['DROPOUT']}"
+        if interleave_lstm_every > 0:
+            tag += f"/interleave_lstm_every_{interleave_lstm_every}"
     elif model == "transformer":
         tag += f"/transformer_{env_vars['NUM_LAYERS']}x{env_vars['HIDDEN_CHANNELS']}"
         tag += (
@@ -510,10 +515,16 @@ def make_common_tag(env_vars: dict, algorithm: Algorithm, agent: Agent) -> str:
         algorithm == "ppo" and agent == "assistant"
     ):
         prev_goal_kl_coeff = env_vars["PREV_GOAL_KL_COEFF"]
-        if algorithm == "ppo" and agent == "assistant" and prev_goal_kl_coeff != 0:
-            tag += f"/prev_goal_kl_schedule_0_0-2000000_{prev_goal_kl_coeff}"
-        else:
+        if prev_goal_kl_coeff == 0:
             tag += f"/prev_goal_kl_{prev_goal_kl_coeff}"
+        elif algorithm == "ppo" and agent == "assistant":
+            prev_goal_kl_coeff_horizon = env_vars["PREV_GOAL_KL_COEFF_HORIZON"]
+            tag += f"/prev_goal_kl_schedule_0_0-{prev_goal_kl_coeff_horizon}_{prev_goal_kl_coeff}"
+        elif algorithm == "alphazero":
+            tag += f"/goal_kl_{prev_goal_kl_coeff}"
+        else:
+            raise ValueError(f"Invalid algorithm: {algorithm}")
+
         # Loss term coefficients that affect pretraining and relate to goal prediction.
         for loss_name in [
             "GOAL_LOSS_COEFF",
@@ -1104,6 +1115,17 @@ def validate_env_vars(env_vars: dict, algorithm: Algorithm) -> None:
     if not env_vars["USE_SEPARATED_TRANSFORMER"] and env_vars["INTERLEAVE_LSTM"]:
         raise ValueError(
             "Interleaving LSTM layers is not supported with a non-separated Transformer."
+        )
+
+    interleave_lstm_every = env_vars["INTERLEAVE_LSTM_EVERY"]
+    interleave_lstm = env_vars["INTERLEAVE_LSTM"]
+    if model == "transformer" and interleave_lstm_every != -1:
+        raise ValueError(
+            "interleave_lstm_every is for convolutional models alone. Use interleave_lstm for transformer models."
+        )
+    elif model == "convolutional" and interleave_lstm:
+        raise ValueError(
+            "interleave_lstm is for transformer models alone. Use interleave_lstm_every for convolutional models."
         )
 
 
