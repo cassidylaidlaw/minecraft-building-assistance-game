@@ -176,7 +176,7 @@ class MbagPPOTorchPolicy(OptimizerMixinV2, PPOTorchPolicy):
 
         model.tower_stats["predict_goal_loss"] = goal_loss.detach()
 
-        if GOAL_LOGITS in train_batch:
+        if GOAL_LOGITS in train_batch and self.prev_goal_kl_coeff != 0:
             prev_goal_logits = cast(torch.Tensor, train_batch[GOAL_LOGITS])
             prev_goal_logits = prev_goal_logits.permute(0, 2, 3, 4, 1).flatten(
                 end_dim=3
