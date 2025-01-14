@@ -26,6 +26,7 @@ from ray.rllib.utils.metrics import (
 from ray.rllib.utils.metrics.learner_info import LEARNER_STATS_KEY
 from ray.rllib.utils.numpy import convert_to_numpy
 from ray.rllib.utils.schedules import PiecewiseSchedule
+from ray.rllib.utils.torch_utils import sequence_mask
 from ray.rllib.utils.typing import PolicyID, ResultDict, TensorType
 from ray.tune.registry import register_trainable
 from ray.util.debug import log_once
@@ -64,6 +65,14 @@ def make_schedule_from_config(
         value = schedule.value(0)
 
     return value, schedule
+
+
+def reduce_mean_valid(t: TensorType, mask: Optional[TensorType] = None) -> TensorType:
+    if mask is None:
+        return torch.mean(t)
+    else:
+        num_valid = torch.sum(mask)
+        return torch.sum(t[mask]) / num_valid
 
 
 class MbagPPOTorchPolicy(OptimizerMixinV2, PPOTorchPolicy):
@@ -135,15 +144,26 @@ class MbagPPOTorchPolicy(OptimizerMixinV2, PPOTorchPolicy):
 
         goal = world_obs[:, GOAL_BLOCKS].long()
 
+        if hasattr(model, "_state") and model._state:
+            batch_size = len(train_batch[SampleBatch.SEQ_LENS])
+            max_seq_len = model.logits.shape[0] // batch_size
+            seq_mask = sequence_mask(  # [batch_size, max_seq_len]
+                train_batch[SampleBatch.SEQ_LENS],
+                max_seq_len,
+                time_major=model.is_time_major(),
+            )
+            seq_mask = torch.reshape(seq_mask, [-1])  # [batch_size * max_seq_len]
+        # non-RNN case: No masking.
+        else:
+            seq_mask = None
+
         loss += self.place_block_loss_coeff * self.place_block_loss(
-            model, dist_class, goal, train_batch
+            model, dist_class, goal, train_batch, seq_mask
         )
 
-        loss += self.config.get("goal_loss_coeff", 0) * self.predict_goal_loss(
-            model, goal, train_batch
-        )
+        loss += self.predict_goal_loss(model, goal, train_batch, seq_mask)
         loss += self.config.get("anchor_policy_kl_coeff", 0) * self.anchor_policy_kl(
-            model, dist_class, train_batch
+            model, dist_class, train_batch, seq_mask
         )
 
         return loss
@@ -166,18 +186,26 @@ class MbagPPOTorchPolicy(OptimizerMixinV2, PPOTorchPolicy):
         model: MbagTorchModel,
         goal: TensorType,
         train_batch: SampleBatch,
+        seq_mask: Optional[TensorType],
     ) -> TensorType:
         if not hasattr(model, "_backbone_out"):
             model(train_batch)
         goal_logits = model.goal_predictor()
 
-        ce = nn.CrossEntropyLoss()
-        goal_loss: torch.Tensor = ce(goal_logits, goal)
-
+        ce = nn.CrossEntropyLoss(reduction="none")
+        goal_ce: torch.Tensor = ce(goal_logits, goal)  # [B, W, H, D]
+        goal_loss = reduce_mean_valid(
+            goal_ce.flatten(start_dim=1).mean(dim=1), mask=seq_mask
+        )
+        weighted_goal_loss = self.config.get("goal_loss_coeff", 0) * goal_loss
         model.tower_stats["predict_goal_loss"] = goal_loss.detach()
 
         if GOAL_LOGITS in train_batch and self.prev_goal_kl_coeff != 0:
             prev_goal_logits = cast(torch.Tensor, train_batch[GOAL_LOGITS])
+            if seq_mask is not None:
+                prev_goal_logits = prev_goal_logits[seq_mask]
+                goal_logits = goal_logits[seq_mask]
+
             prev_goal_logits = prev_goal_logits.permute(0, 2, 3, 4, 1).flatten(
                 end_dim=3
             )
@@ -192,9 +220,9 @@ class MbagPPOTorchPolicy(OptimizerMixinV2, PPOTorchPolicy):
 
             model.tower_stats["prev_goal_kl"] = prev_goal_kl.detach()
 
-            total_loss: torch.Tensor = goal_loss + weighted_prev_goal_kl
+            total_loss: torch.Tensor = weighted_goal_loss + weighted_prev_goal_kl
         else:
-            total_loss = goal_loss
+            total_loss = weighted_goal_loss
 
         return total_loss
 
@@ -204,6 +232,7 @@ class MbagPPOTorchPolicy(OptimizerMixinV2, PPOTorchPolicy):
         dist_class: Type[ActionDistribution],
         goal: TensorType,
         train_batch,
+        seq_mask: Optional[TensorType],
     ) -> TensorType:
         """
         Add loss to minimize the cross-entropy between the block ID for a "place block" action
@@ -234,15 +263,20 @@ class MbagPPOTorchPolicy(OptimizerMixinV2, PPOTorchPolicy):
 
         # We only care about place block actions at places where there are blocks in the
         # goal.
-        place_block_mask = ~torch.any(
+        place_block_mask = ~torch.any(  # [B, W, H, D]
             goal_block_ids[..., None]
             == placeable_block_mask[None, None, None, None, :].to(self.device),
             dim=4,
-        ).flatten()
+        )
+        # Apply sequence mask.
+        if seq_mask is not None:
+            place_block_mask &= seq_mask[:, None, None, None]
+        place_block_mask = place_block_mask.flatten()  # [B, W * H * D]
 
-        place_block_logits = logits[
+        place_block_logits = logits[  # [B, n_blocks, W, H, D]
             :, self.action_mapping.to(self.device)[:, 0] == MbagAction.PLACE_BLOCK
         ].reshape((-1, MinecraftBlocks.NUM_BLOCKS) + world_obs.size()[-3:])
+        # [B * W * H * D, n_blocks]
         place_block_logits = place_block_logits.permute((0, 2, 3, 4, 1)).flatten(
             end_dim=3
         )
@@ -263,7 +297,11 @@ class MbagPPOTorchPolicy(OptimizerMixinV2, PPOTorchPolicy):
         return place_block_loss
 
     def anchor_policy_kl(
-        self, model, dist_class: Type[ActionDistribution], train_batch
+        self,
+        model,
+        dist_class: Type[ActionDistribution],
+        train_batch,
+        seq_mask: Optional[TensorType],
     ) -> Union[torch.Tensor, float]:
         if ANCHOR_POLICY_ACTION_DIST_INPUTS not in train_batch:
             return 0.0
@@ -275,6 +313,9 @@ class MbagPPOTorchPolicy(OptimizerMixinV2, PPOTorchPolicy):
             logger.warn("recomputing logits in anchor_policy_kl")
             logits, state = model(train_batch)
 
+        if seq_mask is not None:
+            # [B, W, H, D] -> [valid_batch_size, W, H, D]
+            logits = logits[seq_mask]
         action_dist = dist_class(logits, model)
         anchor_policy_action_dist_inputs = train_batch[ANCHOR_POLICY_ACTION_DIST_INPUTS]
         anchor_policy_action_dist = dist_class(anchor_policy_action_dist_inputs, model)

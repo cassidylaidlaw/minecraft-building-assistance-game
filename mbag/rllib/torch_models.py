@@ -182,6 +182,7 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
     MASK_LOGIT = -1e8
 
     _logits: torch.Tensor
+    _state: List[torch.Tensor]
     _mask: torch.Tensor
     _goal_preds: torch.Tensor
 
@@ -684,6 +685,7 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
 
         if self.use_prev_blocks:
             state.append(end_current_blocks.clone())
+        self._state = state
 
         if mask_logits and self.mask_action_distribution:
             if ACTION_MASK in input_dict and torch.any(input_dict[ACTION_MASK]):
@@ -699,7 +701,7 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
         else:
             self._mask = torch.ones_like(self._flat_logits, dtype=torch.bool)
 
-        return self._flat_logits, state
+        return self._flat_logits, self._state
 
     @property
     def logits(self) -> torch.Tensor:
