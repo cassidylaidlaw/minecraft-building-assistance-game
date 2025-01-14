@@ -230,9 +230,6 @@ def make_named_configs(ex: Experiment):
         if interleave_lstm:
             input += "_seq_64"
             max_seq_len = 64
-        input_root_dir = None
-        if input_root_dir is not None:
-            input = f"{input_root_dir}/{input}"
 
         experiment_tag = f"bc_human/lr_{lr_start}/infinite_blocks_{str(inf_blocks).lower()}/{data_split}"
         if not (
