@@ -230,6 +230,9 @@ def make_named_configs(ex: Experiment):
         if interleave_lstm:
             input += "_seq_64"
             max_seq_len = 64
+        input_root_dir = None
+        if input_root_dir is not None:
+            input = f"{input_root_dir}/{input}"
 
         experiment_tag = f"bc_human/lr_{lr_start}/infinite_blocks_{str(inf_blocks).lower()}/{data_split}"
         if not (
@@ -337,21 +340,21 @@ def make_named_configs(ex: Experiment):
         entropy_coeff_end = 0.01
         entropy_coeff_horizon = 2_000_000
         own_reward_prop = 1
-        train_batch_size = 32704
-        num_workers = 8
-        num_envs_per_worker = 8
+        train_batch_size = 16384
+        num_workers = 16
+        num_envs_per_worker = 16
         num_gpus = 0.5
-        num_gpus_per_worker = 0.07
+        num_gpus_per_worker = 0.7 / max(num_workers, 1)
         lr = 0.0003
         kl_target = 0.01
         num_sgd_iter = 3
-        rollout_fragment_length = 511
+        rollout_fragment_length = 64
         batch_mode = "truncate_episodes"
         model = "convolutional"
         filter_size = 5
-        hidden_size = 64
-        max_seq_len = 511
-        sgd_minibatch_size = 512
+        hidden_channels = 64
+        max_seq_len = 64
+        sgd_minibatch_size = 256
         use_separated_transformer = True
         num_layers = 8
         num_heads = 4
@@ -367,8 +370,12 @@ def make_named_configs(ex: Experiment):
         reward_scale = 1.0
         custom_action_dist = "mbag_bilevel_categorical"
         goal_loss_coeff = 30
+        prev_goal_kl_coeff = 0
+        prev_goal_kl_coeff_schedule = [
+            [0, 0],
+            [2_000_000, prev_goal_kl_coeff],
+        ]
         mask_goal = True
-        use_per_location_lstm = False
         interleave_lstm_every = num_layers // 2
         policies_to_train = ["assistant"]
         checkpoint_to_load_policies = None

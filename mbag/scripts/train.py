@@ -408,7 +408,11 @@ def sacred_config(_log):  # noqa
     num_heads = 4
     norm_first = False
     use_separated_transformer = False
+    # If the model is "transformer", whether to interleave the LSTM with the transformer
+    # layers
     interleave_lstm = False
+    # If the model is "convolutional", the LSTM is used every interleave_lstm_every
+    # layers.
     interleave_lstm_every = -1
     lstm_size = hidden_size
     use_prev_blocks = False
