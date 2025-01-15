@@ -65,6 +65,7 @@ class GrabcraftGoalGenerator(GoalGenerator):
 
         self._load_block_map()
         self._load_metadata()
+        self.num_remaining_goals = len(self.structure_metadata)
 
     def _get_generic_block_name(self, grabcraft_block_name: str) -> str:
         """

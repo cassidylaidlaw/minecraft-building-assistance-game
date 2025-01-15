@@ -21,12 +21,16 @@ class CraftAssistGoalConfig(TypedDict):
     data_dir: str
     subset: str
     house_id: Optional[str]
+    # Flag to indicate if the same goal can be repeated. If False, each goal will be
+    # generated at most once.
+    repeat: bool
 
 
 DEFAULT_CONFIG: CraftAssistGoalConfig = {
     "data_dir": "data/craftassist",
     "subset": "train",
     "house_id": None,
+    "repeat": True,
 }
 
 
@@ -38,9 +42,17 @@ class CraftAssistStats(TypedDict):
     player_minutes: Dict[str, float]
 
 
+class NoRemainingHouseError(Exception):
+    """Raised when there are no more houses to generate."""
+
+
 class CraftAssistGoalGenerator(GoalGenerator):
     config: CraftAssistGoalConfig
     house_ids: List[str]
+    # House IDs that have not been processed yet. Initially, this is the same as
+    # house_ids. If repeat=False in the config, as a house is processed, it is removed
+    # from this list, whether it was generated successfully or not.
+    remaining_house_ids: List[str]
     last_house_id: Optional[str]
     block_map: Dict[str, Optional[Tuple[str, Optional[str]]]]
 
@@ -85,6 +97,9 @@ class CraftAssistGoalGenerator(GoalGenerator):
             if self.config["house_id"] is None or self.config["house_id"] == house_id:
                 self.house_ids.append(house_id)
 
+        self.remaining_house_ids = list(self.house_ids)
+        self.num_remaining_goals = len(self.house_ids)
+
     @functools.lru_cache
     def _minecraft_ids_to_block_variant(
         self, minecraft_id: int, minecraft_data: int
@@ -93,11 +108,20 @@ class CraftAssistGoalGenerator(GoalGenerator):
         return self.block_map[minecraft_combined_id]
 
     def generate_goal(self, size: WorldSize) -> MinecraftBlocks:
+        if not self.config["repeat"] and not self.remaining_house_ids:
+            raise NoRemainingHouseError(
+                "No more houses to generate. Set repeat to True to repeat houses."
+            )
+
         success = False
         while not success:
             success = True
 
-            house_id = random.choice(self.house_ids)
+            house_index = random.randint(0, len(self.remaining_house_ids) - 1)
+            house_id = self.remaining_house_ids[house_index]
+            if not self.config["repeat"]:
+                self.remaining_house_ids.pop(house_index)
+                self.num_remaining_goals = len(self.remaining_house_ids)
             schematic_fname = os.path.join(
                 self.config["data_dir"],
                 "houses",

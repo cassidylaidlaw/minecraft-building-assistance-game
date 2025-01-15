@@ -1,4 +1,4 @@
-from typing import List, TypedDict
+from typing import List, Optional, TypedDict
 
 from ..blocks import MinecraftBlocks
 from ..types import WorldSize
@@ -62,6 +62,14 @@ class TransformedGoalGenerator(GoalGenerator):
             self.goal_transforms.append(goal_generator)
 
         self.goal_generator = goal_generator
+
+    @property
+    def num_remaining_goals(self) -> Optional[int]:
+        return self.base_goal_generator.num_remaining_goals
+
+    @num_remaining_goals.setter
+    def num_remaining_goals(self, _: Optional[int]) -> None:
+        raise NotImplementedError("num_remaining_goals is read-only")
 
     def generate_goal(self, size: WorldSize) -> MinecraftBlocks:
         return self.goal_generator.generate_goal(size)

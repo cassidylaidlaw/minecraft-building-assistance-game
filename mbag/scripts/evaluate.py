@@ -24,6 +24,9 @@ import mbag
 from mbag.agents.heuristic_agents import ALL_HEURISTIC_AGENTS
 from mbag.agents.human_agent import HumanAgent
 from mbag.environment.config import DEFAULT_HUMAN_GIVE_ITEMS, merge_configs
+from mbag.environment.goals.craftassist import (
+    DEFAULT_CONFIG as CRAFTASSIST_DEFAULT_CONFIG,
+)
 from mbag.environment.mbag_env import MbagConfigDict, MbagEnv
 from mbag.evaluation.episode import MbagEpisode
 from mbag.evaluation.evaluator import MbagAgentConfig, MbagEvaluator
@@ -88,6 +91,10 @@ def sacred_config():
     if out_dir is None:
         raise ValueError("out_dir must be set if no checkpoints are provided")
 
+    # Extra args that are ignored here but used in some of the named configs.
+    goal_data_dir = None  # noqa: F841
+    repeat_goal = False  # noqa: F841
+
     observer = FileStorageObserver(out_dir)
     ex.observers.append(observer)
 
@@ -97,6 +104,8 @@ def human_alone():
     assistant_checkpoint = None
     goal_set = "test"
     house_id = None
+    goal_data_dir = CRAFTASSIST_DEFAULT_CONFIG["data_dir"]
+    repeat_goal = CRAFTASSIST_DEFAULT_CONFIG["repeat"]
 
     runs = ["HumanAgent"]  # noqa: F841
     checkpoints = [assistant_checkpoint]  # noqa: F841
@@ -105,7 +114,12 @@ def human_alone():
     algorithm_config_updates = [{}]  # type: ignore # noqa: F841
     env_config_updates = {  # noqa: F841
         "goal_generator_config": {
-            "goal_generator_config": {"subset": goal_set, "house_id": house_id}
+            "goal_generator_config": {
+                "data_dir": goal_data_dir,
+                "subset": goal_set,
+                "house_id": house_id,
+                "repeat": repeat_goal,
+            }
         },
         "malmo": {"action_delay": 0.8, "rotate_spectator": False},
         "horizon": 10000,
@@ -122,6 +136,8 @@ def human_with_assistant():
     num_simulations = 10
     goal_set = "test"
     house_id = None
+    goal_data_dir = CRAFTASSIST_DEFAULT_CONFIG["data_dir"]
+    repeat_goal = CRAFTASSIST_DEFAULT_CONFIG["repeat"]
 
     runs = ["HumanAgent", assistant_run]  # noqa: F841
     checkpoints = [None, assistant_checkpoint]  # noqa: F841
@@ -139,7 +155,12 @@ def human_with_assistant():
     env_config_updates = {  # noqa: F841
         "num_players": 2,
         "goal_generator_config": {
-            "goal_generator_config": {"subset": goal_set, "house_id": house_id}
+            "goal_generator_config": {
+                "data_dir": goal_data_dir,
+                "subset": goal_set,
+                "house_id": house_id,
+                "repeat": repeat_goal,
+            }
         },
         "malmo": {"action_delay": 0.8, "rotate_spectator": False},
         "horizon": 10000,

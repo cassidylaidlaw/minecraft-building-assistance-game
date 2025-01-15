@@ -411,3 +411,11 @@ ALL_HEURISTIC_AGENTS: Dict[str, Type[MbagAgent]] = {
     "lowest_block": LowestBlockAgent,
     "mirror_builder": MirrorBuildingAgent,
 }
+# Try importing and adding the OracleGoalPredictionAgent to the list of heuristic
+# agents. This is needed because this agent uses rllib, which may not be available.
+try:
+    from .oracle_goal_prediction_agent import OracleGoalPredictionAgent
+
+    ALL_HEURISTIC_AGENTS["oracle_goal_predictor"] = OracleGoalPredictionAgent
+except ImportError:
+    pass
