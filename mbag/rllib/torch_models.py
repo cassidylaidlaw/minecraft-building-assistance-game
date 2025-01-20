@@ -913,6 +913,51 @@ class MbagConvolutionalModel(MbagTorchModel):
             obs_space, action_space, num_outputs, model_config, name, **kwargs
         )
 
+    def load_state_dict(
+        self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False
+    ):
+        """
+        Override load_state_dict to handle different layer naming conventions.
+
+        Args:
+            state_dict (dict): a dict containing parameters and persistent buffers
+            strict (bool, optional): whether to strictly enforce that the keys
+                in state_dict match the keys returned by this module's
+                state_dict() function. Default: True
+        """
+        # Mapping between the LSTM-specific layer name and the generic layer name
+        lstm_to_layer_name_map = {
+            f"backbone.lstm_{i}": f"backbone.layer_{i}"
+            for i in self.backbone.lstm_layer_indices
+        }
+
+        # Try loading with original state dict first
+        try:
+            return super().load_state_dict(state_dict, strict=strict, assign=assign)
+        except RuntimeError as e:
+            # If failed, try to adapt the state dict to match the model's expected names
+            new_state_dict = {}
+
+            for key, value in state_dict.items():
+                converted_key = key
+                for lstm_name, layer_name in lstm_to_layer_name_map.items():
+                    if lstm_name in key:
+                        converted_key = key.replace(lstm_name, layer_name)
+                        break
+                    elif layer_name in key:
+                        converted_key = key.replace(layer_name, lstm_name)
+                        break
+                new_state_dict[converted_key] = value
+
+            # Try loading with the converted state dict
+            try:
+                return super().load_state_dict(
+                    new_state_dict, strict=strict, assign=assign
+                )
+            except RuntimeError as e:
+                print(f"Failed to load model even after name conversion: {str(e)}")
+                raise
+
     def get_initial_state(self):
         if self.interleave_lstm_every > 0:
             assert isinstance(self.backbone, InterleavedBackbone)
