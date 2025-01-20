@@ -368,6 +368,54 @@ class MbagPPOTorchPolicy(OptimizerMixinV2, PPOTorchPolicy):
         if self._prev_goal_kl_coeff_schedule is not None:
             self.prev_goal_kl_coeff = self._prev_goal_kl_coeff_schedule.value(timestep)
 
+    def optimizer(
+        self,
+    ) -> Union[List[torch.optim.Optimizer], torch.optim.Optimizer]:
+        """Customize the local PyTorch optimizer(s) to use.
+
+        Returns:
+            The local PyTorch optimizer(s) to use for this Policy.
+        """
+        model = cast(nn.Module, self.model)
+
+        if self.config is not None:
+            lr = self.config["lr"]
+            rnn_lr = self.config.get("rnn_lr")
+
+            if rnn_lr is None:
+                return super().optimizer()
+
+            raise NotImplementedError(
+                "TODO: handle LSTM params separately without renaming the layers."
+            )
+            # Separate LSTM params and other params
+            lstm_param_names = []  # TODO: remove; this is for debugging
+            lstm_params = []
+            other_params = []
+            for name, param in model.named_parameters():
+                if "lstm" in name:
+                    lstm_param_names.append(name)
+                    lstm_params.append(param)
+                else:
+                    other_params.append(param)
+
+            optimizer_config = self.config.get("optimizer", {})
+
+            # Create optimizer with parameter groups
+            optimizer: torch.optim.Optimizer = torch.optim.Adam(
+                [
+                    {"params": other_params, "lr": lr, **optimizer_config},
+                    {"params": lstm_params, "lr": rnn_lr, **optimizer_config},
+                ]
+            )
+        else:
+            optimizer = torch.optim.Adam(model.parameters())
+        optimizers = [optimizer]
+        if self.exploration:
+            optimizers = self.exploration.get_exploration_optimizer(optimizers)
+
+        return optimizers
+
 
 class MbagPPOConfig(PPOConfig):
     def __init__(self, algo_class=None):
@@ -395,6 +443,7 @@ class MbagPPOConfig(PPOConfig):
         anchor_policy_mapping=NotProvided,
         anchor_policy_kl_coeff=NotProvided,
         anchor_policy_reverse_kl=NotProvided,
+        # rnn_lr=NotProvided,
         **kwargs,
     ):
         super().training(*args, **kwargs)
@@ -417,6 +466,8 @@ class MbagPPOConfig(PPOConfig):
             self.anchor_policy_kl_coeff = anchor_policy_kl_coeff
         if anchor_policy_reverse_kl is not NotProvided:
             self.anchor_policy_reverse_kl = anchor_policy_reverse_kl
+        # if rnn_lr is not NotProvided:
+        #     self.rnn_lr = rnn_lr
 
 
 class MbagPPO(PPO, KLRegularizationMixin):
