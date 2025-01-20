@@ -756,6 +756,10 @@ def sacred_config(_log):  # noqa
                 anchor_policy_mapping=anchor_policy_mapping,
                 anchor_policy_kl_coeff=anchor_policy_kl_coeff,
                 anchor_policy_reverse_kl=anchor_policy_reverse_kl,
+                prev_goal_kl_coeff=prev_goal_kl_coeff,
+                prev_goal_kl_coeff_schedule=convert_dogmatics_to_standard(
+                    prev_goal_kl_coeff_schedule
+                ),
             )
         if isinstance(config, MbagGAILConfig):
             demonstration_input = None
@@ -930,6 +934,7 @@ def sacred_config(_log):  # noqa
     data_split = None  # noqa: F841
     lr_start = None  # noqa: F841
     puct_str = None  # noqa: F841
+    input_root_dir = None  # noqa: F841
 
 
 make_named_configs(ex)
