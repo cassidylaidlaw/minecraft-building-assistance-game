@@ -239,6 +239,7 @@ class BCConfig(AlgorithmConfig):
         self.sgd_minibatch_size = 128
         self.num_sgd_iter = 30
         self.validation_participant_ids: Collection[int] = []
+        self.validation_prop: float = 0.0
         self.entropy_coeff: float = 0.0
         self.vf_loss_coeff: float = 0.0
         self.data_augmentation: Callable[[SampleBatch], SampleBatch] = lambda x: x
@@ -256,6 +257,7 @@ class BCConfig(AlgorithmConfig):
         entropy_coeff=NotProvided,
         vf_loss_coeff=NotProvided,
         validation_participant_ids=NotProvided,
+        validation_prop=NotProvided,
         data_augmentation=NotProvided,
         **kwargs,
     ):
@@ -280,6 +282,8 @@ class BCConfig(AlgorithmConfig):
             self.vf_loss_coeff = vf_loss_coeff
         if validation_participant_ids is not NotProvided:
             self.validation_participant_ids = validation_participant_ids
+        if validation_prop is not NotProvided:
+            self.validation_prop = validation_prop
         if data_augmentation is not NotProvided:
             self.data_augmentation = data_augmentation
 
@@ -302,22 +306,38 @@ class BC(Algorithm):
         self,
         train_batch: MultiAgentBatch,
     ) -> Tuple[MultiAgentBatch, Optional[MultiAgentBatch]]:
-        if not self.config["validation_participant_ids"]:
-            return train_batch, None
-        else:
+        if (
+            self.config["validation_participant_ids"]
+            or self.config["validation_prop"] > 0
+        ):
+            assert not (
+                self.config["validation_participant_ids"]
+                and self.config["validation_prop"] > 0
+            ), "Cannot set both validation_participant_ids and validation_prop."
             train_policy_batches: Dict[PolicyID, SampleBatch] = {}
             validation_policy_batches: Dict[PolicyID, SampleBatch] = {}
             for policy_id, policy_batch in train_batch.policy_batches.items():
                 train_episodes: List[SampleBatch] = []
                 validation_episodes: List[SampleBatch] = []
                 for episode_batch in policy_batch.split_by_episode():
-                    assert PARTICIPANT_ID in episode_batch
-                    participant_id = episode_batch[PARTICIPANT_ID][0]
-                    assert np.all(episode_batch[PARTICIPANT_ID] == participant_id)
-                    if participant_id in self.config["validation_participant_ids"]:
-                        validation_episodes.append(episode_batch)
+                    if self.config["validation_participant_ids"]:
+                        assert PARTICIPANT_ID in episode_batch
+                        participant_id = episode_batch[PARTICIPANT_ID][0]
+                        assert np.all(episode_batch[PARTICIPANT_ID] == participant_id)
+                        if participant_id in self.config["validation_participant_ids"]:
+                            validation_episodes.append(episode_batch)
+                        else:
+                            train_episodes.append(episode_batch)
                     else:
-                        train_episodes.append(episode_batch)
+                        if (
+                            np.random.default_rng(
+                                seed=episode_batch[SampleBatch.EPS_ID][0]
+                            ).random()
+                            < self.config["validation_prop"]
+                        ):
+                            validation_episodes.append(episode_batch)
+                        else:
+                            train_episodes.append(episode_batch)
                 train_policy_batch = concat_samples(train_episodes)
                 train_policy_batches[policy_id] = train_policy_batch
                 validation_policy_batch = concat_samples(validation_episodes)
@@ -332,6 +352,8 @@ class BC(Algorithm):
                 MultiAgentBatch(train_policy_batches, train_env_steps),
                 MultiAgentBatch(validation_policy_batches, validation_env_steps),
             )
+        else:
+            return train_batch, None
 
     def _run_validation(self, validation_batch: MultiAgentBatch) -> dict:
         assert self.workers is not None

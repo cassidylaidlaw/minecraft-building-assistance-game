@@ -553,37 +553,6 @@ class MbagAlphaZero(AlphaZero, KLRegularizationMixin):
                             self.config.model_train_batch_size
                         )
 
-                        from typing import cast
-
-                        from ray.rllib.utils.replay_buffers import (
-                            MultiAgentReplayBuffer,
-                        )
-
-                        print(
-                            cast(MultiAgentReplayBuffer, self.local_replay_buffer)
-                            .replay_buffers["assistant"]
-                            ._est_size_bytes
-                            / (1024**2),
-                            cast(MultiAgentReplayBuffer, self.model_replay_buffer)
-                            .replay_buffers["assistant"]
-                            ._est_size_bytes
-                            / (1024**2),
-                        )
-
-                        print(
-                            len(
-                                cast(MultiAgentReplayBuffer, self.local_replay_buffer)
-                                .replay_buffers["assistant"]
-                                ._storage,
-                            ),
-                            len(
-                                cast(MultiAgentReplayBuffer, self.model_replay_buffer)
-                                .replay_buffers["assistant"]
-                                ._storage,
-                            ),
-                            flush=True,
-                        )
-
                         assert (
                             policy_train_batch is not None
                             and model_train_batch is not None

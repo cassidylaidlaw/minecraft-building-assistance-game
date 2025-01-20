@@ -235,6 +235,8 @@ def make_named_configs(ex: Experiment):
             input = f"{input_root_dir}/{input}"
 
         experiment_tag = f"bc_human/lr_{lr_start}/infinite_blocks_{str(inf_blocks).lower()}/{data_split}"
+        if not permute_block_types:
+            experiment_tag += "/no_data_augmentation"
         if not (
             ((num_layers, hidden_channels) == (6, 64) and not interleave_lstm)
             or ((num_layers, hidden_channels) == (8, 64) and interleave_lstm)
@@ -468,3 +470,48 @@ def make_named_configs(ex: Experiment):
             f"alphazero_assistant/infinite_blocks_{str(inf_blocks).lower()}/"
             f"human_{checkpoint_name}"
         )
+
+    @ex.named_config
+    def non_goal_conditioned_human():
+        run = "BC"
+        inf_blocks = True
+        teleportation = False
+        train_batch_size = 8192
+        validation_prop = 0.1
+        num_workers = 0
+        evaluation_interval = None
+        save_freq = 100
+        evaluation_num_workers = 0
+        goal_generator = "craftassist"
+        width = 11
+        height = 10
+        depth = 10
+        model = "convolutional"
+        hidden_channels = 64
+        filter_size = 5
+        dropout = 0
+        interleave_lstm = True
+        interleave_lstm_every = 4 if interleave_lstm else -1
+        num_layers = 8 if interleave_lstm else 6
+        vf_share_layers = True
+        sgd_minibatch_size = 256
+        max_seq_len = 64
+        num_sgd_iter = 1
+        compress_observations = True
+        mask_action_distribution = True
+        num_training_iters = 10_000
+        lr = 1e-3
+        scale_obs = True
+        use_extra_features = False
+        mask_goal = True
+
+        # These need to be passed in as command line arguments.
+        checkpoint_name = ""
+        input = ""
+
+        experiment_tag = (
+            f"non_goal_conditioned_human/infinite_blocks_{str(inf_blocks).lower()}/"
+            f"human_{checkpoint_name}/lstm_{interleave_lstm}"
+        )
+        if dropout != 0:
+            experiment_tag += f"/dropout_{dropout}"

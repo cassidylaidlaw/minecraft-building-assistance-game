@@ -340,6 +340,7 @@ def sacred_config(_log):  # noqa
     pretrain = False
     strict_mode = False
     validation_participant_ids: List[int] = []
+    validation_prop = 0
     permute_block_types: bool = False
 
     # MCTS
@@ -885,6 +886,7 @@ def sacred_config(_log):  # noqa
             validation_participant_ids=convert_dogmatics_to_standard(
                 validation_participant_ids
             ),
+            validation_prop=validation_prop,
         )
 
     if permute_block_types:
