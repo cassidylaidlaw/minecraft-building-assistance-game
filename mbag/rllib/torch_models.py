@@ -210,6 +210,9 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
         assert isinstance(world_obs_space, spaces.Box)
         self.world_obs_space: spaces.Box = world_obs_space
         self.world_size = cast(WorldSize, self.world_obs_space.shape[-3:])
+        inventory_obs_space = obs_space[1]
+        assert isinstance(inventory_obs_space, spaces.Box)
+        self.inventory_obs_space: spaces.Box = inventory_obs_space
 
         extra_config = copy.deepcopy(DEFAULT_CONFIG)
         if "env_config" in kwargs:
@@ -783,6 +786,58 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
             value = value.cpu().numpy()
 
             return priors, value, [state.detach() for state in state_out]
+
+    def load_state_dict(self, state_dict, strict=True, assign=False):
+        if (
+            self.fc_after_embedding.weight.size()
+            != state_dict["fc_after_embedding.weight"].size()
+        ):
+            # This can happen if the loaded state dict was trained with a different
+            # number of inventory inputs.
+
+            # Figure out where the inventory observation starts in the embedded obs.
+            embedded_obs = self._get_embedded_obs(
+                torch.zeros(
+                    (1,) + self.world_obs_space.shape,
+                    dtype=torch.long,
+                    device=self.device,
+                ),
+                torch.full(
+                    (1,) + self.inventory_obs_space.shape,
+                    np.nan,
+                    device=self.device,
+                ),
+                torch.zeros(1, dtype=torch.long, device=self.device),
+            )
+            inventory_obs_indices = torch.nonzero(
+                torch.isnan(embedded_obs[0, :, 0, 0, 0])
+            )[:, 0]
+            inventory_obs_end = inventory_obs_indices[-1] + 1 - embedded_obs.size()[1]
+
+            # Resize the weight and bias tensors to match the new size.
+            fc_weight = state_dict["fc_after_embedding.weight"]
+            resized_fc_weight = self.fc_after_embedding.weight.data.clone()
+            size_diff = resized_fc_weight.size()[1] - fc_weight.size()[1]
+            if size_diff > 0:
+                resized_fc_weight[:, : inventory_obs_end - size_diff] = fc_weight[
+                    :, :inventory_obs_end
+                ]
+                resized_fc_weight[:, inventory_obs_end:] = fc_weight[
+                    :, inventory_obs_end:
+                ]
+            else:
+                resized_fc_weight[:, :inventory_obs_end] = fc_weight[
+                    :, : inventory_obs_end - size_diff
+                ]
+                resized_fc_weight[:, inventory_obs_end:] = fc_weight[
+                    :, inventory_obs_end:
+                ]
+
+            state_dict = {
+                **state_dict,
+                "fc_after_embedding.weight": resized_fc_weight,
+            }
+        return super().load_state_dict(state_dict, strict, assign)
 
 
 class ResidualBlock(nn.Module):
