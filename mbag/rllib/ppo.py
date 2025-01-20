@@ -443,7 +443,6 @@ class MbagPPOConfig(PPOConfig):
         anchor_policy_mapping=NotProvided,
         anchor_policy_kl_coeff=NotProvided,
         anchor_policy_reverse_kl=NotProvided,
-        # rnn_lr=NotProvided,
         **kwargs,
     ):
         super().training(*args, **kwargs)
@@ -466,8 +465,6 @@ class MbagPPOConfig(PPOConfig):
             self.anchor_policy_kl_coeff = anchor_policy_kl_coeff
         if anchor_policy_reverse_kl is not NotProvided:
             self.anchor_policy_reverse_kl = anchor_policy_reverse_kl
-        # if rnn_lr is not NotProvided:
-        #     self.rnn_lr = rnn_lr
 
 
 class MbagPPO(PPO, KLRegularizationMixin):
