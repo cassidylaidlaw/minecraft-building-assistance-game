@@ -202,6 +202,7 @@ DEFAULT_ASSISTANT_PPO_ENV_VARS = dict(
     DROPOUT=0,
     NUM_SGD_ITER=3,
     LR=0.0003,
+    RNN_LR=None,
     GRAD_CLIP=10,
     CLIP_PARAM=0.2,
     LAMBDA=0.95,
@@ -451,7 +452,11 @@ def make_common_tag(env_vars: dict, algorithm: Algorithm, agent: Agent) -> str:
             model_replay_buffer_size = 0
         tag += f"/model_replay_{model_replay_buffer_size}"
 
-    tag += f"/max_seq_len_{env_vars['MAX_SEQ_LEN']}/gamma_{env_vars['GAMMA']}/lr_{env_vars['LR']}/weight_decay_{env_vars.get('WEIGHT_DECAY', 0)}"
+    tag += f"/max_seq_len_{env_vars['MAX_SEQ_LEN']}/gamma_{env_vars['GAMMA']}/lr_{env_vars['LR']}"
+    rnn_lr = env_vars.get("RNN_LR")
+    if rnn_lr is not None:
+        tag += f"/rnn_lr_{rnn_lr}"
+    tag += f"/weight_decay_{env_vars.get('WEIGHT_DECAY', 0)}"
     vf_scale = env_vars.get("VF_SCALE", 1)
     if vf_scale != 1:
         tag += f"/vf_scale_{vf_scale}"
@@ -873,11 +878,6 @@ def get_env_vars_for_experiment(
                 "RANDOMIZE_FIRST_EPISODE_LENGTH", False
             )
             env_vars["ROLLOUT_FRAGMENT_LENGTH"] = horizon
-            env_vars["MAX_SEQ_LEN"] = horizon
-            # Set SGD_MINIBATCH_SIZE to horizon + 1 because it must be strictly
-            # greater than ROLLOUT_FRAGMENT_LENGTH and MAX_SEQ_LEN according to
-            # rllib.
-            env_vars["SGD_MINIBATCH_SIZE"] = horizon + 1
 
         # Replay buffer (only relevant to AlphaZero).
         if algorithm == "alphazero":
@@ -1129,8 +1129,8 @@ def validate_env_vars(env_vars: dict, algorithm: Algorithm) -> None:
         )
 
 
-def make_extra_slurm_args(env_vars: dict, algorithm: Algorithm) -> str:
-    extra_slurm_args = []
+def make_extra_slurm_args(env_vars: dict, algorithm: Algorithm) -> Dict[str, Any]:
+    extra_slurm_args = {}
 
     # Memory
     mem = env_vars.pop("mem", None)
@@ -1145,10 +1145,12 @@ def make_extra_slurm_args(env_vars: dict, algorithm: Algorithm) -> str:
             else:
                 mem = "200GB"
     if mem is not None:
-        extra_slurm_args.append(f"--mem={mem}")
+        extra_slurm_args["mem"] = mem
 
-    a100_nodelist = "--nodelist=airl.ist.berkeley.edu,sac.ist.berkeley.edu,rlhf.ist.berkeley.edu,cirl.ist.berkeley.edu"
-    exclude_a4000_nodelist = "--exclude=ppo.ist.berkeley.edu,vae.ist.berkeley.edu"
+    a100_nodelist = {
+        "nodelist": "airl.ist.berkeley.edu,sac.ist.berkeley.edu,rlhf.ist.berkeley.edu,cirl.ist.berkeley.edu"
+    }
+    exclude_a4000_nodelist = {"exclude": "ppo.ist.berkeley.edu,vae.ist.berkeley.edu"}
 
     # If the model is large, run on machines with A100 GPUs.
     num_layers = env_vars["NUM_LAYERS"]
@@ -1164,11 +1166,11 @@ def make_extra_slurm_args(env_vars: dict, algorithm: Algorithm) -> str:
         )
         or (not use_separated_transformer and num_layers >= 6)
     ):
-        extra_slurm_args.append(a100_nodelist)
+        extra_slurm_args.update(a100_nodelist)
     else:
         # Otherwise, exclude machines with small GPUs. --exclude seems to be
         # mutually exclusive with --nodelist, for some reason.
-        extra_slurm_args.append(exclude_a4000_nodelist)
+        extra_slurm_args.update(exclude_a4000_nodelist)
 
     return extra_slurm_args
 
@@ -1190,10 +1192,17 @@ def make_env_vars_str(env_vars: dict, skip_null: bool = True) -> str:
 
 
 def make_train_command_for_experiment(
-    env_vars: dict, algorithm: Algorithm, agent: Agent
+    env_vars: dict,
+    algorithm: Algorithm,
+    agent: Agent,
+    extra_slurm_args_overrides: Optional[Dict[str, Any]] = None,
 ) -> str:
     extra_slurm_args = make_extra_slurm_args(env_vars, algorithm)
-    extra_slurm_args_str = " ".join(extra_slurm_args)
+    if extra_slurm_args_overrides is not None:
+        extra_slurm_args.update(extra_slurm_args_overrides)
+    extra_slurm_args_str = " ".join(
+        [f"--{key}={value}" for key, value in extra_slurm_args.items()]
+    )
     if extra_slurm_args_str:
         extra_slurm_args_str += " "
 
