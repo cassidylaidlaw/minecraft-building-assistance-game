@@ -980,16 +980,16 @@ class MbagConvolutionalModel(MbagTorchModel):
                 in state_dict match the keys returned by this module's
                 state_dict() function. Default: True
         """
-        # Mapping between the LSTM-specific layer name and the generic layer name
-        lstm_to_layer_name_map = {
-            f"backbone.lstm_{i}": f"backbone.layer_{i}"
-            for i in self.backbone.lstm_layer_indices
-        }
-
         # Try loading with original state dict first
         try:
             return super().load_state_dict(state_dict, strict=strict, assign=assign)
         except RuntimeError as e:
+            # Mapping between the LSTM-specific layer name and the generic layer name
+            lstm_to_layer_name_map = {
+                f"backbone.lstm_{i}": f"backbone.layer_{i}"
+                for i in self.backbone.lstm_layer_indices
+            }
+
             # If failed, try to adapt the state dict to match the model's expected names
             new_state_dict = {}
 
