@@ -1199,6 +1199,13 @@ def make_train_command_for_experiment(
 ) -> str:
     extra_slurm_args = make_extra_slurm_args(env_vars, algorithm)
     if extra_slurm_args_overrides is not None:
+        assert not (
+            "exclude" in extra_slurm_args_overrides and "nodelist" in extra_slurm_args
+        ), "Cannot specify both 'exclude' and 'nomydelist'."
+        if "nodelist" in extra_slurm_args_overrides and "exclude" in extra_slurm_args:
+            del extra_slurm_args["exclude"]
+        elif "exclude" in extra_slurm_args_overrides and "nodelist" in extra_slurm_args:
+            del extra_slurm_args["nodelist"]
         extra_slurm_args.update(extra_slurm_args_overrides)
     extra_slurm_args_str = " ".join(
         [f"--{key}={value}" for key, value in extra_slurm_args.items()]
