@@ -4,6 +4,7 @@ import os
 from typing import List, Optional
 
 import numpy as np
+from braceexpand import braceexpand
 from ray.rllib.offline.json_writer import JsonWriter
 from ray.rllib.policy.sample_batch import MultiAgentBatch, SampleBatch
 from sacred import Experiment
@@ -24,6 +25,7 @@ ex = Experiment()
 @ex.config
 def sacred_config():
     data_dir = ""
+    data_glob = os.path.join(data_dir, "**", "episode.{pkl,zip}")  # noqa: F841
     # Episode info file to load the MBAG config from.
     load_mbag_config_from: Optional[str] = None  # noqa: F841
 
@@ -42,12 +44,16 @@ def sacred_config():
     inventory_player_indices = player_indices  # noqa: F841
     policy_id = None  # noqa: F841
     max_seq_len = None  # noqa: F841
+    remove_malmo_observations = True  # noqa: F841
 
     # sequence_overlap > 1 outputs multiple copies of each episode split into sequences
     # that are overlapping.
     sequence_overlap = 1  # noqa: F841
 
+    experiment_tag = None
     experiment_name = "rllib"
+    if experiment_tag is not None:
+        experiment_name += f"_{experiment_tag}"
     if not include_noops:
         experiment_name += "_no_noops"
     elif include_noops_for_other_player_actions:
@@ -63,12 +69,14 @@ def sacred_config():
     experiment_name += f"_inventory_{'_'.join(map(str, inventory_player_indices))}"
     experiment_name += f"_seq_{max_seq_len}" if max_seq_len is not None else ""
     experiment_name += f"_overlap_{sequence_overlap}" if sequence_overlap > 1 else ""
-    out_dir = os.path.join(data_dir, experiment_name)  # noqa: F841
+    out_root = data_dir
+    out_dir = os.path.join(out_root, experiment_name)  # noqa: F841
 
 
 @ex.automain
 def main(  # noqa: C901
     data_dir: str,
+    data_glob: str,
     load_mbag_config_from: Optional[str],
     out_dir: str,
     mbag_config: MbagConfigDict,
@@ -83,6 +91,7 @@ def main(  # noqa: C901
     inventory_player_indices: List[int],
     policy_id: Optional[str],
     max_seq_len: Optional[int],
+    remove_malmo_observations: bool,
     sequence_overlap: int,
     _log: logging.Logger,
 ):
@@ -93,11 +102,11 @@ def main(  # noqa: C901
         episode = load_episode(load_mbag_config_from)
         mbag_config = episode.env_config
 
-    episode_fnames = glob.glob(
-        os.path.join(data_dir, "**", "episode.pkl"), recursive=True
-    ) + glob.glob(os.path.join(data_dir, "**", "episode.zip"), recursive=True)
+    episode_fnames: List[str] = []
+    for expanded_glob in braceexpand(data_glob):
+        episode_fnames.extend(glob.glob(expanded_glob, recursive=True))
     if not episode_fnames:
-        raise FileNotFoundError(f"No episode files found in {data_dir}.")
+        raise FileNotFoundError(f"No episode files found matching {data_glob}.")
 
     if os.path.exists(out_dir):
         raise FileExistsError(f"Output directory {out_dir} already exists.")
@@ -153,6 +162,7 @@ def main(  # noqa: C901
                 flat_actions=flat_actions,
                 flat_observations=flat_observations,
                 action_delay=action_delay,
+                remove_malmo_observations=remove_malmo_observations,
             )
 
             if len(sample_batch) == 0:

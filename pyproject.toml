@@ -67,6 +67,7 @@ rllib = [
     "torch>=1.8",
     "sacred==0.8.4",
     "einops>=0.3.0",
+    "braceexpand>=0.1.7",
 ]
 malmo = [
     "mbag-malmo>=0.38.0",

@@ -1,5 +1,4 @@
 import logging
-import numbers
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, cast
 
@@ -88,7 +87,7 @@ class MbagMCTSNode:
         self.mcts = mcts
 
         if isinstance(self.parent, MbagRootParentNode):
-            if isinstance(self.mcts.c_puct, numbers.Real):
+            if isinstance(self.mcts.c_puct, (float, int)):
                 self.c_puct = self.mcts.c_puct
             elif self.mcts.sample_c_puct_every_timestep or np.isnan(c_puct):
                 # Implement DiL-piKL by randomly choosing a c_puct value from the list.
@@ -484,9 +483,12 @@ class MbagMCTSNode:
         all_actions: Tuple[int, ...] = (action,)
         other_agent_actions: Optional[List[int]] = None
         if self.other_agent_action_dist is not None:
-            other_agent_action = np.random.choice(
-                np.arange(self.action_space_size), p=self.other_agent_action_dist
-            )
+            if self.mcts.use_other_agent_action_predictor:
+                other_agent_action = np.random.choice(
+                    np.arange(self.action_space_size), p=self.other_agent_action_dist
+                )
+            else:
+                other_agent_action = 0  # NOOP
             all_actions = action, other_agent_action
             other_agent_actions = [other_agent_action]
 
@@ -642,12 +644,14 @@ class MbagMCTS(MCTS):
         gamma: float,
         use_critic=True,
         use_goal_predictor=True,
+        use_other_agent_action_predictor=True,
         _strict_mode=False,
     ):
         super().__init__(model, mcts_param)
         self.gamma = gamma  # Discount factor.
         self.use_critic = use_critic
         self.use_goal_predictor = use_goal_predictor
+        self.use_other_agent_action_predictor = use_other_agent_action_predictor
         self._strict_mode = _strict_mode
 
         self._temperature_schedule = None

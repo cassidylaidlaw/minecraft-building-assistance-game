@@ -335,6 +335,7 @@ def sacred_config(_log):  # noqa
     model_train_batch_size = train_batch_size
     use_critic = True
     use_goal_predictor = True
+    use_other_agent_action_predictor = True
     other_agent_action_predictor_loss_coeff = 1.0
     reward_scale = 1.0
     pretrain = False
@@ -537,6 +538,7 @@ def sacred_config(_log):  # noqa
     overwrite_loaded_policy_type = use_anchor_policy
     overwrite_loaded_policy_model = False
     load_config_from_checkpoint = not overwrite_loaded_policy_type
+    exclude_loaded_policy_modules = []  # noqa: F841
     if isinstance(load_policies_mapping, DogmaticDict):
         # Weird shim for sacred
         for key in load_policies_mapping.revelation():
@@ -831,6 +833,7 @@ def sacred_config(_log):  # noqa
             mcts_batch_size=mcts_batch_size,
             use_critic=use_critic,
             use_goal_predictor=use_goal_predictor,
+            use_other_agent_action_predictor=use_other_agent_action_predictor,
             expected_own_reward_scale=expected_own_reward_scale,
             expected_reward_shift=expected_reward_shift,
             other_agent_action_predictor_loss_coeff=other_agent_action_predictor_loss_coeff,
@@ -950,6 +953,7 @@ def main(
     save_freq,
     checkpoint_path: Optional[str],
     checkpoint_to_load_policies: Optional[str],
+    exclude_loaded_policy_modules: List[str],
     load_policies_mapping: Dict[str, str],
     observer,
     ray_init_options,
@@ -997,6 +1001,10 @@ def main(
             checkpoint_to_load_policies,
             trainer,
             lambda policy_id: load_policies_mapping.get(policy_id),
+            lambda param_name: not any(
+                param_name.startswith(module_name)
+                for module_name in exclude_loaded_policy_modules
+            ),
         )
 
     if checkpoint_path is not None:

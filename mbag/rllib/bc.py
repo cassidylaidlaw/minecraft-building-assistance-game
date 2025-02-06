@@ -89,8 +89,8 @@ class BCTorchPolicy(LearningRateSchedule, OptimizerMixin, TorchPolicy):
         model_out, state = model(train_batch)
         values = model.value_function()
         action_dist: ActionDistribution = dist_class(model_out, model)
-        actions = train_batch[SampleBatch.ACTIONS]
-        logprobs = action_dist.logp(actions)
+        actions = cast(torch.Tensor, train_batch[SampleBatch.ACTIONS])
+        logprobs = cast(torch.Tensor, action_dist.logp(actions))
 
         mask = torch.ones(
             model_out.size()[0], dtype=torch.bool, device=model_out.device
@@ -98,10 +98,13 @@ class BCTorchPolicy(LearningRateSchedule, OptimizerMixin, TorchPolicy):
         if state:
             B = len(train_batch[SampleBatch.SEQ_LENS])  # noqa: N806
             max_seq_len = model_out.shape[0] // B
-            mask &= sequence_mask(
-                train_batch[SampleBatch.SEQ_LENS],
-                max_seq_len,
-                time_major=model.is_time_major(),
+            mask &= cast(
+                torch.Tensor,
+                sequence_mask(
+                    train_batch[SampleBatch.SEQ_LENS],
+                    max_seq_len,
+                    time_major=model.is_time_major(),
+                ),
             ).reshape(-1)
             assert isinstance(mask, torch.Tensor)
         mask &= logprobs > MbagTorchModel.MASK_LOGIT
@@ -111,7 +114,7 @@ class BCTorchPolicy(LearningRateSchedule, OptimizerMixin, TorchPolicy):
 
         bc_loss = reduce_mean_valid(-logprobs)
         accuracy = reduce_mean_valid(
-            (action_dist.deterministic_sample() == actions).float()
+            (cast(torch.Tensor, action_dist.deterministic_sample()) == actions).float()
         )
 
         value_loss = reduce_mean_valid(
@@ -308,11 +311,11 @@ class BC(Algorithm):
     ) -> Tuple[MultiAgentBatch, Optional[MultiAgentBatch]]:
         if (
             self.config["validation_participant_ids"]
-            or self.config["validation_prop"] > 0
+            or self.config.get("validation_prop", 0) > 0
         ):
             assert not (
                 self.config["validation_participant_ids"]
-                and self.config["validation_prop"] > 0
+                and self.config.get("validation_prop", 0) > 0
             ), "Cannot set both validation_participant_ids and validation_prop."
             train_policy_batches: Dict[PolicyID, SampleBatch] = {}
             validation_policy_batches: Dict[PolicyID, SampleBatch] = {}

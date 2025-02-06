@@ -199,7 +199,7 @@
     },
     "evaluation_duration": 64,
     "evaluation_duration_unit": "episodes",
-    "evaluation_interval": 1,
+    "evaluation_interval": null,
     "evaluation_num_episodes": -1,
     "evaluation_num_workers": 8,
     "evaluation_parallel_to_training": false,
@@ -218,7 +218,7 @@
     "grad_clip_by": "global_norm",
     "ignore_worker_failures": false,
     "in_evaluation": false,
-    "input_": "data/human_data_cleaned/human_alone/infinite_blocks_true/rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_0_inventory_0",
+    "input_": "data/human_data_cleaned/human_alone/infinite_blocks_true/rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_0_inventory_0_seq_64",
     "input_config": {},
     "input_evaluation": -1,
     "keep_per_episode_custom_metrics": false,
@@ -239,7 +239,7 @@
         0.001
       ],
       [
-        192840.0,
+        144630.0,
         0.0001
       ]
     ],
@@ -467,7 +467,7 @@
               "filter_size": 5,
               "hidden_channels": 64,
               "hidden_size": 64,
-              "interleave_lstm_every": -1,
+              "interleave_lstm_every": 4,
               "line_of_sight_masking": true,
               "lstm_size": 64,
               "mask_action_distribution": true,
@@ -476,7 +476,7 @@
               "num_action_layers": 2,
               "num_conv_1_layers": 1,
               "num_inventory_obs": 1,
-              "num_layers": 6,
+              "num_layers": 8,
               "num_value_layers": 2,
               "scale_obs": true,
               "use_extra_features": true,
@@ -487,7 +487,7 @@
               "use_resnet": true,
               "vf_scale": 1.0
             },
-            "max_seq_len": 1500,
+            "max_seq_len": 64,
             "vf_share_layers": true
           }
         },
@@ -757,6 +757,7 @@
     "use_worker_filter_stats": true,
     "validate_workers_after_construction": true,
     "validation_participant_ids": [],
+    "validation_prop": 0,
     "vf_loss_coeff": 0,
     "worker_cls": -1,
     "worker_health_probe_timeout_s": 60,
@@ -871,7 +872,7 @@
     "filter_size": 5,
     "hidden_channels": 64,
     "hidden_size": 64,
-    "interleave_lstm_every": -1,
+    "interleave_lstm_every": 4,
     "line_of_sight_masking": true,
     "lstm_size": 64,
     "mask_action_distribution": true,
@@ -880,7 +881,7 @@
     "num_action_layers": 2,
     "num_conv_1_layers": 1,
     "num_inventory_obs": 1,
-    "num_layers": 6,
+    "num_layers": 8,
     "num_value_layers": 2,
     "scale_obs": true,
     "use_extra_features": true,
@@ -900,7 +901,7 @@
   },
   "custom_action_dist": "categorical_no_inf",
   "data_augmentation": {
-    "py/function": "__main__.data_augmentation"
+    "py/function": "mbag.scripts.train.data_augmentation"
   },
   "data_split": "human_alone",
   "density_config": {
@@ -1055,16 +1056,16 @@
   "evaluation_num_workers": 8,
   "expected_own_reward_scale": 1.0,
   "expected_reward_shift": 0.0,
-  "experiment_dir": "data/logs/BC/1_player/11x10x10/craftassist/bc_human/lr_0.001/infinite_blocks_true/human_alone/dropout_0.7/use_prev_action/40_iters/2025-01-06_20-25-29",
+  "experiment_dir": "data/logs/BC/1_player/11x10x10/craftassist/bc_human/lr_0.001/infinite_blocks_true/human_alone/lstm/use_prev_action/30_iters/2025-01-15_07-51-41",
   "experiment_name_parts": [
     "BC",
     "1_player",
     "11x10x10",
     "craftassist",
-    "bc_human/lr_0.001/infinite_blocks_true/human_alone/dropout_0.7/use_prev_action/40_iters",
-    "2025-01-06_20-25-29"
+    "bc_human/lr_0.001/infinite_blocks_true/human_alone/lstm/use_prev_action/30_iters",
+    "2025-01-15_07-51-41"
   ],
-  "experiment_tag": "bc_human/lr_0.001/infinite_blocks_true/human_alone/dropout_0.7/use_prev_action/40_iters",
+  "experiment_tag": "bc_human/lr_0.001/infinite_blocks_true/human_alone/lstm/use_prev_action/30_iters",
   "explore_noops": true,
   "extract_largest_cc": true,
   "extract_largest_cc_connectivity": 18,
@@ -1151,9 +1152,9 @@
   "incorrect_action_reward": 0,
   "inf_blocks": true,
   "init_q_with_max": false,
-  "input": "data/human_data_cleaned/human_alone/infinite_blocks_true/rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_0_inventory_0",
-  "interleave_lstm": false,
-  "interleave_lstm_every": -1,
+  "input": "data/human_data_cleaned/human_alone/infinite_blocks_true/rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_0_inventory_0_seq_64",
+  "interleave_lstm": true,
+  "interleave_lstm_every": 4,
   "is_human": [
     false
   ],
@@ -1171,7 +1172,7 @@
       0.001
     ],
     [
-      192840.0,
+      144630.0,
       0.0001
     ]
   ],
@@ -1181,7 +1182,7 @@
   "mask_goal": false,
   "mask_other_players": true,
   "max_density": 1,
-  "max_seq_len": 1500,
+  "max_seq_len": 64,
   "mcts_batch_size": null,
   "min_density": 0,
   "min_depth": 4,
@@ -1308,7 +1309,7 @@
       "filter_size": 5,
       "hidden_channels": 64,
       "hidden_size": 64,
-      "interleave_lstm_every": -1,
+      "interleave_lstm_every": 4,
       "line_of_sight_masking": true,
       "lstm_size": 64,
       "mask_action_distribution": true,
@@ -1317,7 +1318,7 @@
       "num_action_layers": 2,
       "num_conv_1_layers": 1,
       "num_inventory_obs": 1,
-      "num_layers": 6,
+      "num_layers": 8,
       "num_value_layers": 2,
       "scale_obs": true,
       "use_extra_features": true,
@@ -1328,7 +1329,7 @@
       "use_resnet": true,
       "vf_scale": 1.0
     },
-    "max_seq_len": 1500,
+    "max_seq_len": 64,
     "vf_share_layers": true
   },
   "model_replay_buffer_size": 10,
@@ -1345,20 +1346,20 @@
   "num_gpus_per_worker": 0.0625,
   "num_heads": 4,
   "num_inventory_obs": 1,
-  "num_layers": 6,
+  "num_layers": 8,
   "num_lstm_layers": 1,
   "num_players": 1,
   "num_res_blocks": 1,
   "num_sgd_iter": 1,
   "num_simulations": 30,
-  "num_training_iters": 40,
+  "num_training_iters": 30,
   "num_value_layers": 2,
   "num_workers": 0,
   "observation_space": {
     "py/id": 45
   },
   "observer": {
-    "basedir": "data/logs/BC/1_player/11x10x10/craftassist/bc_human/lr_0.001/infinite_blocks_true/human_alone/dropout_0.7/use_prev_action/40_iters/2025-01-06_20-25-29",
+    "basedir": "data/logs/BC/1_player/11x10x10/craftassist/bc_human/lr_0.001/infinite_blocks_true/human_alone/lstm/use_prev_action/30_iters/2025-01-15_07-51-41",
     "config": {
       "py/id": 0
     },
@@ -1366,7 +1367,7 @@
     "copy_sources": true,
     "cout": "",
     "cout_write_cursor": 0,
-    "dir": "data/logs/BC/1_player/11x10x10/craftassist/bc_human/lr_0.001/infinite_blocks_true/human_alone/dropout_0.7/use_prev_action/40_iters/2025-01-06_20-25-29/1",
+    "dir": "data/logs/BC/1_player/11x10x10/craftassist/bc_human/lr_0.001/infinite_blocks_true/human_alone/lstm/use_prev_action/30_iters/2025-01-15_07-51-41/1",
     "info": {},
     "priority": 20,
     "py/object": "__main__.NoTypeAnnotationsFileStorageObserver",
@@ -1387,10 +1388,10 @@
             "lr_0.001",
             "infinite_blocks_true",
             "human_alone",
-            "dropout_0.7",
+            "lstm",
             "use_prev_action",
-            "40_iters",
-            "2025-01-06_20-25-29",
+            "30_iters",
+            "2025-01-15_07-51-41",
             "_resources"
           ]
         }
@@ -1413,17 +1414,17 @@
         "name": "train_mbag",
         "repositories": [
           {
-            "commit": "fcbc3318d4898a22af58633039ce61ee8a8165a3",
+            "commit": "11e494b78bcbf465c92a7f066fc30053ec54ea56",
             "dirty": true,
             "url": "https://github.com/cassidylaidlaw/minecraft-building-assistance-game"
           },
           {
-            "commit": "fcbc3318d4898a22af58633039ce61ee8a8165a3",
+            "commit": "11e494b78bcbf465c92a7f066fc30053ec54ea56",
             "dirty": true,
             "url": "https://github.com/cassidylaidlaw/minecraft-building-assistance-game"
           },
           {
-            "commit": "fcbc3318d4898a22af58633039ce61ee8a8165a3",
+            "commit": "11e494b78bcbf465c92a7f066fc30053ec54ea56",
             "dirty": true,
             "url": "https://github.com/cassidylaidlaw/minecraft-building-assistance-game"
           }
@@ -1435,11 +1436,11 @@
           ],
           [
             "train.py",
-            "_sources/train_d15cbc0ac107d1430710fdec12de1b9a.py"
+            "_sources/train_69dd2d53da4718c6caf281aa21f63161.py"
           ],
           [
             "train_configs.py",
-            "_sources/train_configs_63585168d914f09090920dbcd630d953.py"
+            "_sources/train_configs_cd0447f684f0759ad20dcac5035b1fcf.py"
           ]
         ]
       },
@@ -1448,16 +1449,16 @@
         "ENV": {},
         "cpu": "AMD EPYC 7763 64-Core Processor",
         "gpus": {
-          "driver_version": "535.129.03",
+          "driver_version": "535.104.12",
           "gpus": [
             {
-              "model": "NVIDIA A100 80GB PCIe",
+              "model": "NVIDIA A100-SXM4-80GB",
               "persistence_mode": true,
               "total_memory": 81920
             }
           ]
         },
-        "hostname": "cirl.ist.berkeley.edu",
+        "hostname": "sac.ist.berkeley.edu",
         "os": [
           "Linux",
           "Linux-5.4.0-192-generic-x86_64-with-glibc2.17"
@@ -1473,10 +1474,11 @@
           "dropout": 0.7,
           "evaluation_interval": null,
           "inf_blocks": true,
-          "interleave_lstm": false,
+          "interleave_lstm": true,
           "lr_start": 0.001,
           "norm_first": false,
-          "num_training_iters": 40,
+          "num_training_iters": 30,
+          "permute_block_types": true,
           "use_prev_action": true,
           "validation_participant_ids": []
         },
@@ -1507,16 +1509,17 @@
           "COMMAND": null,
           "UPDATE": [
             "bc_human",
+            "permute_block_types=True",
             "lr_start=1e-3",
             "data_split=human_alone",
             "inf_blocks=True",
             "checkpoint_to_load_policies=None",
             "checkpoint_name=none",
             "use_prev_action=True",
-            "interleave_lstm=False",
+            "interleave_lstm=True",
             "norm_first=False",
             "dropout=0.7",
-            "num_training_iters=40",
+            "num_training_iters=30",
             "validation_participant_ids=[]",
             "evaluation_interval=None"
           ],
@@ -1525,7 +1528,7 @@
         }
       },
       "resources": [],
-      "start_time": "2025-01-06T20:25:29.954586",
+      "start_time": "2025-01-15T07:51:41.984248",
       "status": "RUNNING"
     },
     "source_dir": {
@@ -1545,10 +1548,10 @@
             "lr_0.001",
             "infinite_blocks_true",
             "human_alone",
-            "dropout_0.7",
+            "lstm",
             "use_prev_action",
-            "40_iters",
-            "2025-01-06_20-25-29",
+            "30_iters",
+            "2025-01-15_07-51-41",
             "_sources"
           ]
         }
@@ -1712,7 +1715,7 @@
         "filter_size": 5,
         "hidden_channels": 64,
         "hidden_size": 64,
-        "interleave_lstm_every": -1,
+        "interleave_lstm_every": 4,
         "line_of_sight_masking": true,
         "lstm_size": 64,
         "mask_action_distribution": true,
@@ -1721,7 +1724,7 @@
         "num_action_layers": 2,
         "num_conv_1_layers": 1,
         "num_inventory_obs": 1,
-        "num_layers": 6,
+        "num_layers": 8,
         "num_value_layers": 2,
         "scale_obs": true,
         "use_extra_features": true,
@@ -1732,7 +1735,7 @@
         "use_resnet": true,
         "vf_scale": 1.0
       },
-      "max_seq_len": 1500,
+      "max_seq_len": 64,
       "vf_share_layers": true
     }
   },
@@ -1789,7 +1792,7 @@
   "teleportation": false,
   "temperature": 1.5,
   "temperature_end": 1.5,
-  "temperature_horizon": 385680,
+  "temperature_horizon": 289260,
   "temperature_start": 1.5,
   "timestep_skip": [
     1
@@ -1877,6 +1880,7 @@
   "use_scale_shift_norm": true,
   "use_separated_transformer": true,
   "validation_participant_ids": [],
+  "validation_prop": 0,
   "vf_loss_coeff": 0,
   "vf_scale": 1.0,
   "vf_share_layers": true,

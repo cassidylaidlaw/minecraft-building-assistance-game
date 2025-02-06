@@ -205,7 +205,7 @@
     },
     "evaluation_duration": 64,
     "evaluation_duration_unit": "episodes",
-    "evaluation_interval": 1,
+    "evaluation_interval": null,
     "evaluation_num_episodes": -1,
     "evaluation_num_workers": 8,
     "evaluation_parallel_to_training": false,
@@ -224,7 +224,7 @@
     "grad_clip_by": "global_norm",
     "ignore_worker_failures": false,
     "in_evaluation": false,
-    "input_": "data/human_data_cleaned/combined/infinite_blocks_true/rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_0_inventory_0_1",
+    "input_": "data/human_data_cleaned/combined/infinite_blocks_true/rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_0_inventory_0_1_seq_64",
     "input_config": {},
     "input_evaluation": -1,
     "keep_per_episode_custom_metrics": false,
@@ -479,7 +479,7 @@
               "filter_size": 5,
               "hidden_channels": 64,
               "hidden_size": 64,
-              "interleave_lstm_every": -1,
+              "interleave_lstm_every": 4,
               "line_of_sight_masking": true,
               "lstm_size": 64,
               "mask_action_distribution": true,
@@ -488,7 +488,7 @@
               "num_action_layers": 2,
               "num_conv_1_layers": 1,
               "num_inventory_obs": 2,
-              "num_layers": 6,
+              "num_layers": 8,
               "num_value_layers": 2,
               "scale_obs": true,
               "use_extra_features": true,
@@ -499,7 +499,7 @@
               "use_resnet": true,
               "vf_scale": 1.0
             },
-            "max_seq_len": 1500,
+            "max_seq_len": 64,
             "vf_share_layers": true
           }
         },
@@ -738,6 +738,7 @@
     "use_worker_filter_stats": true,
     "validate_workers_after_construction": true,
     "validation_participant_ids": [],
+    "validation_prop": 0,
     "vf_loss_coeff": 0,
     "worker_cls": -1,
     "worker_health_probe_timeout_s": 60,
@@ -858,7 +859,7 @@
     "filter_size": 5,
     "hidden_channels": 64,
     "hidden_size": 64,
-    "interleave_lstm_every": -1,
+    "interleave_lstm_every": 4,
     "line_of_sight_masking": true,
     "lstm_size": 64,
     "mask_action_distribution": true,
@@ -867,7 +868,7 @@
     "num_action_layers": 2,
     "num_conv_1_layers": 1,
     "num_inventory_obs": 2,
-    "num_layers": 6,
+    "num_layers": 8,
     "num_value_layers": 2,
     "scale_obs": true,
     "use_extra_features": true,
@@ -887,7 +888,7 @@
   },
   "custom_action_dist": "categorical_no_inf",
   "data_augmentation": {
-    "py/function": "__main__.data_augmentation"
+    "py/function": "mbag.scripts.train.data_augmentation"
   },
   "data_split": "combined",
   "density_config": {
@@ -1048,16 +1049,16 @@
   "evaluation_num_workers": 8,
   "expected_own_reward_scale": 1.0,
   "expected_reward_shift": 0.0,
-  "experiment_dir": "data/logs/BC/2_players/11x10x10/craftassist/bc_human/lr_0.001/infinite_blocks_true/combined/dropout_0.7/use_prev_action/40_iters/2025-01-06_20-26-30",
+  "experiment_dir": "data/logs/BC/2_players/11x10x10/craftassist/bc_human/lr_0.001/infinite_blocks_true/combined/lstm/use_prev_action/2025-01-14_00-47-16",
   "experiment_name_parts": [
     "BC",
     "2_players",
     "11x10x10",
     "craftassist",
-    "bc_human/lr_0.001/infinite_blocks_true/combined/dropout_0.7/use_prev_action/40_iters",
-    "2025-01-06_20-26-30"
+    "bc_human/lr_0.001/infinite_blocks_true/combined/lstm/use_prev_action",
+    "2025-01-14_00-47-16"
   ],
-  "experiment_tag": "bc_human/lr_0.001/infinite_blocks_true/combined/dropout_0.7/use_prev_action/40_iters",
+  "experiment_tag": "bc_human/lr_0.001/infinite_blocks_true/combined/lstm/use_prev_action",
   "explore_noops": true,
   "extract_largest_cc": true,
   "extract_largest_cc_connectivity": 18,
@@ -1145,9 +1146,9 @@
   "incorrect_action_reward": 0,
   "inf_blocks": true,
   "init_q_with_max": false,
-  "input": "data/human_data_cleaned/combined/infinite_blocks_true/rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_0_inventory_0_1",
-  "interleave_lstm": false,
-  "interleave_lstm_every": -1,
+  "input": "data/human_data_cleaned/combined/infinite_blocks_true/rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_0_inventory_0_1_seq_64",
+  "interleave_lstm": true,
+  "interleave_lstm_every": 4,
   "is_human": [
     false,
     false
@@ -1176,7 +1177,7 @@
   "mask_goal": false,
   "mask_other_players": false,
   "max_density": 1,
-  "max_seq_len": 1500,
+  "max_seq_len": 64,
   "mcts_batch_size": null,
   "min_density": 0,
   "min_depth": 4,
@@ -1309,7 +1310,7 @@
       "filter_size": 5,
       "hidden_channels": 64,
       "hidden_size": 64,
-      "interleave_lstm_every": -1,
+      "interleave_lstm_every": 4,
       "line_of_sight_masking": true,
       "lstm_size": 64,
       "mask_action_distribution": true,
@@ -1318,7 +1319,7 @@
       "num_action_layers": 2,
       "num_conv_1_layers": 1,
       "num_inventory_obs": 2,
-      "num_layers": 6,
+      "num_layers": 8,
       "num_value_layers": 2,
       "scale_obs": true,
       "use_extra_features": true,
@@ -1329,7 +1330,7 @@
       "use_resnet": true,
       "vf_scale": 1.0
     },
-    "max_seq_len": 1500,
+    "max_seq_len": 64,
     "vf_share_layers": true
   },
   "model_replay_buffer_size": 10,
@@ -1346,7 +1347,7 @@
   "num_gpus_per_worker": 0.0625,
   "num_heads": 4,
   "num_inventory_obs": 2,
-  "num_layers": 6,
+  "num_layers": 8,
   "num_lstm_layers": 1,
   "num_players": 2,
   "num_res_blocks": 1,
@@ -1359,7 +1360,7 @@
     "py/id": 47
   },
   "observer": {
-    "basedir": "data/logs/BC/2_players/11x10x10/craftassist/bc_human/lr_0.001/infinite_blocks_true/combined/dropout_0.7/use_prev_action/40_iters/2025-01-06_20-26-30",
+    "basedir": "data/logs/BC/2_players/11x10x10/craftassist/bc_human/lr_0.001/infinite_blocks_true/combined/lstm/use_prev_action/2025-01-14_00-47-16",
     "config": {
       "py/id": 0
     },
@@ -1367,7 +1368,7 @@
     "copy_sources": true,
     "cout": "",
     "cout_write_cursor": 0,
-    "dir": "data/logs/BC/2_players/11x10x10/craftassist/bc_human/lr_0.001/infinite_blocks_true/combined/dropout_0.7/use_prev_action/40_iters/2025-01-06_20-26-30/1",
+    "dir": "data/logs/BC/2_players/11x10x10/craftassist/bc_human/lr_0.001/infinite_blocks_true/combined/lstm/use_prev_action/2025-01-14_00-47-16/1",
     "info": {},
     "priority": 20,
     "py/object": "__main__.NoTypeAnnotationsFileStorageObserver",
@@ -1388,10 +1389,9 @@
             "lr_0.001",
             "infinite_blocks_true",
             "combined",
-            "dropout_0.7",
+            "lstm",
             "use_prev_action",
-            "40_iters",
-            "2025-01-06_20-26-30",
+            "2025-01-14_00-47-16",
             "_resources"
           ]
         }
@@ -1414,17 +1414,17 @@
         "name": "train_mbag",
         "repositories": [
           {
-            "commit": "fcbc3318d4898a22af58633039ce61ee8a8165a3",
+            "commit": "647129ba9b7b2c7e850f6183ef15e73ac28c1d65",
             "dirty": true,
             "url": "https://github.com/cassidylaidlaw/minecraft-building-assistance-game"
           },
           {
-            "commit": "fcbc3318d4898a22af58633039ce61ee8a8165a3",
+            "commit": "647129ba9b7b2c7e850f6183ef15e73ac28c1d65",
             "dirty": true,
             "url": "https://github.com/cassidylaidlaw/minecraft-building-assistance-game"
           },
           {
-            "commit": "fcbc3318d4898a22af58633039ce61ee8a8165a3",
+            "commit": "647129ba9b7b2c7e850f6183ef15e73ac28c1d65",
             "dirty": true,
             "url": "https://github.com/cassidylaidlaw/minecraft-building-assistance-game"
           }
@@ -1436,11 +1436,11 @@
           ],
           [
             "train.py",
-            "_sources/train_d15cbc0ac107d1430710fdec12de1b9a.py"
+            "_sources/train_69dd2d53da4718c6caf281aa21f63161.py"
           ],
           [
             "train_configs.py",
-            "_sources/train_configs_63585168d914f09090920dbcd630d953.py"
+            "_sources/train_configs_6ddac3a4370d8469ab1ce2bdc7ca273d.py"
           ]
         ]
       },
@@ -1474,7 +1474,7 @@
           "dropout": 0.7,
           "evaluation_interval": null,
           "inf_blocks": true,
-          "interleave_lstm": false,
+          "interleave_lstm": true,
           "lr_start": 0.001,
           "norm_first": false,
           "num_training_iters": 40,
@@ -1514,7 +1514,7 @@
             "checkpoint_to_load_policies=None",
             "checkpoint_name=none",
             "use_prev_action=True",
-            "interleave_lstm=False",
+            "interleave_lstm=True",
             "norm_first=False",
             "dropout=0.7",
             "num_training_iters=40",
@@ -1526,7 +1526,7 @@
         }
       },
       "resources": [],
-      "start_time": "2025-01-06T20:26:30.679131",
+      "start_time": "2025-01-14T00:47:17.166931",
       "status": "RUNNING"
     },
     "source_dir": {
@@ -1546,10 +1546,9 @@
             "lr_0.001",
             "infinite_blocks_true",
             "combined",
-            "dropout_0.7",
+            "lstm",
             "use_prev_action",
-            "40_iters",
-            "2025-01-06_20-26-30",
+            "2025-01-14_00-47-16",
             "_sources"
           ]
         }
@@ -1725,7 +1724,7 @@
         "filter_size": 5,
         "hidden_channels": 64,
         "hidden_size": 64,
-        "interleave_lstm_every": -1,
+        "interleave_lstm_every": 4,
         "line_of_sight_masking": true,
         "lstm_size": 64,
         "mask_action_distribution": true,
@@ -1734,7 +1733,7 @@
         "num_action_layers": 2,
         "num_conv_1_layers": 1,
         "num_inventory_obs": 2,
-        "num_layers": 6,
+        "num_layers": 8,
         "num_value_layers": 2,
         "scale_obs": true,
         "use_extra_features": true,
@@ -1745,7 +1744,7 @@
         "use_resnet": true,
         "vf_scale": 1.0
       },
-      "max_seq_len": 1500,
+      "max_seq_len": 64,
       "vf_share_layers": true
     }
   },
@@ -1755,7 +1754,7 @@
   ],
   "policy_loss_coeff": 1,
   "policy_mapping_fn": {
-    "py/function": "__main__.policy_mapping_fn"
+    "py/function": "mbag.scripts.train.policy_mapping_fn"
   },
   "position_embedding_angle": 10,
   "position_embedding_size": 48,
@@ -1894,6 +1893,7 @@
   "use_scale_shift_norm": true,
   "use_separated_transformer": true,
   "validation_participant_ids": [],
+  "validation_prop": 0,
   "vf_loss_coeff": 0,
   "vf_scale": 1.0,
   "vf_share_layers": true,

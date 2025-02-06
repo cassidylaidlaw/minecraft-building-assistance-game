@@ -69,6 +69,7 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
         self.entropy_coeff_schedule = 0
         self.use_critic = True
         self.use_goal_predictor = True
+        self.use_other_agent_action_predictor = True
         self.expected_own_reward_scale = 1.0
         self.expected_reward_shift = 0.0
         self.use_replay_buffer = True
@@ -101,6 +102,7 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
         entropy_coeff_schedule=NotProvided,
         use_critic=NotProvided,
         use_goal_predictor=NotProvided,
+        use_other_agent_action_predictor=NotProvided,
         expected_own_reward_scale=NotProvided,
         expected_reward_shift=NotProvided,
         use_replay_buffer=NotProvided,
@@ -146,6 +148,9 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
                 coefficient.
             use_critic (bool): Whether to use a critic.
             use_goal_predictor (bool): Whether to use a goal predictor.
+            use_other_agent_action_predictor (bool): Whether to use an other agent
+                action predictor. If False and there are two agents, then always
+                predicts NOOPs for the other player.
             expected_own_reward_scale (float): The expected own reward is scaled by
                 this value before being used for planning.
             expected_reward_shift (float): The expected reward is shifted by this
@@ -204,6 +209,8 @@ class MbagAlphaZeroConfig(AlphaZeroConfig):
             self.use_critic = use_critic
         if use_goal_predictor is not NotProvided:
             self.use_goal_predictor = use_goal_predictor
+        if use_other_agent_action_predictor is not NotProvided:
+            self.use_other_agent_action_predictor = use_other_agent_action_predictor
         if expected_own_reward_scale is not NotProvided:
             self.expected_own_reward_scale = expected_own_reward_scale
         if expected_reward_shift is not NotProvided:

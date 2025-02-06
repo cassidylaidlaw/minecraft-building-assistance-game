@@ -568,7 +568,9 @@ class MalmoClient(object):
                 if env_config["malmo"]["video_dir"]:
                     self._generate_record_fname(env_config)
                     record_spec = MalmoPython.MissionRecordSpec(self.record_fname)
-                    record_spec.recordMP4(MalmoPython.FrameType.VIDEO, 20, 400000, True)
+                    record_spec.recordMP4(
+                        MalmoPython.FrameType.VIDEO, 30, 3_500_000, True
+                    )
 
             # Open up another tunnel for the Minecraft server once the first player's
             # game is started.

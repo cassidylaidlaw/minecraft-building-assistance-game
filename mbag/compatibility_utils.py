@@ -17,7 +17,7 @@ class OldHumanDataUnpickler(pickle.Unpickler):
 
 
 def convert_old_rewards_config_to_new(
-    old_rewards_config: Union[RewardsConfigDict, dict]
+    old_rewards_config: Union[RewardsConfigDict, dict],
 ) -> RewardsConfigDict:
     new_rewards_config: RewardsConfigDict = {}
 

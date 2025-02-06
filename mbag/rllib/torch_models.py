@@ -787,9 +787,9 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
 
             return priors, value, [state.detach() for state in state_out]
 
-    def load_state_dict(self, state_dict, strict=True, assign=False):
-        if (
-            self.fc_after_embedding.weight.size()
+    def load_state_dict(self, state_dict, *args, **kwargs):
+        if self.use_fc_after_embedding and (
+            cast(torch.Tensor, self.fc_after_embedding.weight).size()
             != state_dict["fc_after_embedding.weight"].size()
         ):
             # This can happen if the loaded state dict was trained with a different
@@ -816,7 +816,9 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
 
             # Resize the weight and bias tensors to match the new size.
             fc_weight = state_dict["fc_after_embedding.weight"]
-            resized_fc_weight = self.fc_after_embedding.weight.data.clone()
+            resized_fc_weight = cast(
+                nn.Parameter, self.fc_after_embedding.weight
+            ).data.clone()
             size_diff = resized_fc_weight.size()[1] - fc_weight.size()[1]
             if size_diff > 0:
                 resized_fc_weight[:, : inventory_obs_end - size_diff] = fc_weight[
@@ -837,7 +839,7 @@ class MbagTorchModel(TorchModelV2, nn.Module, ABC):
                 **state_dict,
                 "fc_after_embedding.weight": resized_fc_weight,
             }
-        return super().load_state_dict(state_dict, strict, assign)
+        return super().load_state_dict(state_dict, *args, **kwargs)
 
 
 class ResidualBlock(nn.Module):

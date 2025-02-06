@@ -23,8 +23,12 @@ EPISODE_DIR = "episode_dir"
 def load_episode(episode_fname: str) -> MbagEpisode:
     if episode_fname.endswith(".zip"):
         with zipfile.ZipFile(episode_fname, "r") as zip_file:
-            with zip_file.open("episode.pkl", "r") as episode_file:
-                episode = OldHumanDataUnpickler(episode_file).load()
+            try:
+                with zip_file.open("episode.pkl", "r") as episode_file:
+                    episode = OldHumanDataUnpickler(episode_file).load()
+            except KeyError:
+                with zip_file.open("episodes.pickle", "r") as episode_file:
+                    (episode,) = OldHumanDataUnpickler(episode_file).load()
     else:
         with open(episode_fname, "rb") as episode_file:
             episode = OldHumanDataUnpickler(episode_file).load()
@@ -48,6 +52,7 @@ def convert_episode_to_sample_batch(  # noqa: C901
     include_noops_for_other_player_actions=True,
     flat_actions=False,
     flat_observations=False,
+    remove_malmo_observations=False,
     action_delay=DEFAULT_CONFIG["malmo"]["action_delay"],
 ) -> SampleBatch:
     if mbag_config is None:
@@ -109,6 +114,11 @@ def convert_episode_to_sample_batch(  # noqa: C901
             if prev_action_time is None:
                 prev_action_time = info["malmo_observations"][0][0]
             current_time = info["malmo_observations"][-1][0]
+        if remove_malmo_observations:
+            info = {
+                **info,
+                "malmo_observations": [],
+            }
 
         if (include_noops and action_delay == 0) or not_noop:
             action_id: Union[int, MbagActionTuple]
@@ -136,6 +146,24 @@ def convert_episode_to_sample_batch(  # noqa: C901
                                 other_player_index
                             ][1]
                         inventory_obs_pieces.append(other_inventory)
+                inventory_obs = np.stack(inventory_obs_pieces, axis=0)
+            else:
+                # Modify inventory_obs to only include the specified players.
+                assert player_index in inventory_player_indices
+                inventory_obs_pieces = [inventory_obs[0]]
+
+                for inventory_player_index in inventory_player_indices:
+                    if inventory_player_index == player_index:
+                        continue
+                    inventory_index = inventory_player_index
+                    if inventory_index < player_index:
+                        inventory_index += 1
+
+                    if inventory_index < inventory_obs.shape[0]:
+                        inventory_obs_pieces.append(inventory_obs[inventory_index])
+                    else:
+                        # The inventory observation is missing for this player.
+                        inventory_obs_pieces.append(np.zeros_like(inventory_obs[0]))
                 inventory_obs = np.stack(inventory_obs_pieces, axis=0)
             # The inventory obs should be zeros if the player has infinite blocks.
             if mbag_config["abilities"]["inf_blocks"]:
@@ -176,6 +204,12 @@ def convert_episode_to_sample_batch(  # noqa: C901
                     t += 1
                 prev_action_time = current_time
 
+            if info.get("timestamp") is None and current_time is not None:
+                info = {
+                    **info,
+                    "timestamp": current_time,
+                }
+
             sample_batch_builder.add_values(
                 **{
                     SampleBatch.T: t,
@@ -188,10 +222,7 @@ def convert_episode_to_sample_batch(  # noqa: C901
                     SampleBatch.ACTION_LOGP: 0.0,
                     SampleBatch.REWARDS: intermediate_rewards,
                     SampleBatch.DONES: False,
-                    SampleBatch.INFOS: {
-                        **info,
-                        "timestamp": current_time,
-                    },
+                    SampleBatch.INFOS: info,
                     PARTICIPANT_ID: participant_id,
                     EPISODE_DIR: episode_dir,
                 }

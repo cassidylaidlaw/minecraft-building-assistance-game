@@ -1,7 +1,7 @@
 import copy
 import logging
 import time
-from typing import Iterable, List, Optional, cast
+from typing import List, Optional, cast
 
 import numpy as np
 from ray.rllib.evaluation import SampleBatch
@@ -44,6 +44,19 @@ class RllibMbagAgentConfigDict(TypedDict):
     effects of its own place/break actions.
     """
 
+    confidence_threshold: Optional[float]
+    """
+    If this is not None, the agent will only take actions if the probability of the
+    chosen action is greater than this threshold. If all action probabilities are less than the
+    threshold, the agent will take a NOOP action.
+    """
+
+    temperature: float
+    """
+    The temperature to use when sampling from the policy. If this is 0, the policy will
+    always choose the action with the highest probability.
+    """
+
 
 class RllibMbagAgent(MbagAgent):
     agent_config: RllibMbagAgentConfigDict
@@ -61,9 +74,8 @@ class RllibMbagAgent(MbagAgent):
         self.policy = self.agent_config["policy"]
         self.explore = self.agent_config.get("explore", False)
         self.min_action_interval = self.agent_config["min_action_interval"]
-        self.confidence_threshold = cast(
-            Optional[float], self.agent_config.get("confidence_threshold", None)
-        )
+        self.confidence_threshold = self.agent_config.get("confidence_threshold", None)
+        self.temperature = self.agent_config.get("temperature", 1.0)
         self.ignore_own_actions = self.agent_config.get("ignore_own_actions", False)
         self.action_mapping = MbagActionDistribution.get_action_mapping(self.env_config)
 
@@ -124,7 +136,7 @@ class RllibMbagAgent(MbagAgent):
         # obs_batch = torch.from_numpy(preprocessor.transform(obs)[None]).to(self.policy.device)
         state_batch = [state_piece[None] for state_piece in self.state]
         state_out_batch: List[TensorType]
-        action_batch: Iterable[np.ndarray]
+        action_batch: TensorType
         action_batch, state_out_batch, compute_actions_info = (
             self.policy.compute_actions(
                 obs_batch,
@@ -137,14 +149,25 @@ class RllibMbagAgent(MbagAgent):
         )
         self.state = [state_piece[0] for state_piece in state_out_batch]
 
+        if self.temperature != 1.0 and not force_noop:
+            assert self.confidence_threshold is None
+            logits = compute_actions_info[SampleBatch.ACTION_DIST_INPUTS][0]
+            if self.temperature == 0:
+                action_batch = np.argmax(logits)[None]
+            else:
+                probs = np.exp(logits / self.temperature)
+                probs /= np.sum(probs)
+                action_batch = np.random.choice(np.arange(len(probs)), p=probs)[None]
+
         if self.confidence_threshold is not None and not force_noop:
+            assert self.temperature == 1.0
             logits = compute_actions_info[SampleBatch.ACTION_DIST_INPUTS][0]
             probs = np.exp(logits)
             probs /= np.sum(probs)
             (action_id,) = action_batch
             # normalized_probs = probs / np.mean(probs[probs != 0])
             if probs[action_id] < self.confidence_threshold:
-                action_batch = [np.array(0)]
+                action_batch = np.array([0])
             # normalized_probs[normalized_probs < self.normalized_confidence_threshold] = 0
             # if np.sum(normalized_probs) == 0:
             #     normalized_probs[0] = 1

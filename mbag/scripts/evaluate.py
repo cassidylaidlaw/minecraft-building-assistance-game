@@ -11,6 +11,7 @@ import time
 import zipfile
 from datetime import datetime
 from logging import Logger
+from queue import Empty
 from typing import Any, Generator, List, Optional, Type, Union
 
 import numpy as np
@@ -24,6 +25,7 @@ import mbag
 from mbag.agents.heuristic_agents import ALL_HEURISTIC_AGENTS
 from mbag.agents.human_agent import HumanAgent
 from mbag.environment.config import DEFAULT_HUMAN_GIVE_ITEMS, merge_configs
+from mbag.environment.goals.goal_transform import TransformedGoalGenerator
 from mbag.environment.mbag_env import MbagConfigDict, MbagEnv
 from mbag.evaluation.episode import MbagEpisode
 from mbag.evaluation.evaluator import MbagAgentConfig, MbagEvaluator
@@ -52,6 +54,7 @@ def sacred_config():
     min_action_interval = 0  # noqa: F841
     explore = [False] * len(runs)  # noqa: F841
     confidence_thresholds = None  # noqa: F841
+    temperatures = [1.0] * len(runs)  # noqa: F841
     num_episodes = 100  # noqa: F841
     experiment_name = ""
     experiment_tag = experiment_name  # noqa: F841
@@ -62,6 +65,7 @@ def sacred_config():
     out_dir = None  # noqa: F841
     save_episodes = use_malmo  # noqa: F841
 
+    env_config = None  # noqa: F841
     env_config_updates = {}  # noqa: F841
     algorithm_config_updates = [{}]  # type: ignore # noqa: F841
     agent_config_updates = [{}]  # type: ignore # noqa: F841
@@ -72,6 +76,7 @@ def sacred_config():
     num_simulations = None  # noqa: F841
     goal_set = None  # noqa: F841
     house_id = None  # noqa: F841
+    expected_reward_shift = 0  # noqa: F841
 
     # Output directory/logging
     time_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -156,6 +161,183 @@ def human_with_assistant():
     use_malmo = True  # noqa: F841
 
 
+@ex.named_config
+def human_study():
+    runs = ["HumanAgent"]  # noqa: F841
+    house_id = None
+    env_config = {  # noqa: F841
+        "abilities": {"flying": True, "inf_blocks": True, "teleportation": False},
+        "goal_generator": TransformedGoalGenerator,
+        "goal_generator_config": {
+            "goal_generator": "craftassist",
+            "goal_generator_config": {
+                "subset": "test",
+                "house_id": house_id,
+            },
+            "transforms": [
+                {"config": {"connectivity": 18}, "transform": "largest_cc"},
+                {"transform": "crop_air"},
+                {
+                    "config": {"density_threshold": 0.1},
+                    "transform": "crop_low_density_bottom_layers",
+                },
+                {"config": {"min_size": [4, 4, 4]}, "transform": "min_size_filter"},
+                {
+                    "config": {
+                        "interpolate": True,
+                        "interpolation_order": 1,
+                        "max_scaling_factor": 2,
+                        "max_scaling_factor_ratio": 1.5,
+                        "preserve_paths": True,
+                        "scale_y_independently": True,
+                    },
+                    "transform": "area_sample",
+                },
+                {
+                    "config": {"max_density": 1, "min_density": 0},
+                    "transform": "density_filter",
+                },
+                {"transform": "randomly_place"},
+                {"transform": "add_grass"},
+                {"config": {"connectivity": 18}, "transform": "single_cc_filter"},
+            ],
+        },
+        "horizon": 10_000,
+        "malmo": {
+            "action_delay": 0.8,
+            "use_malmo": True,
+            "rotate_spectator": True,
+        },
+        "num_players": 1,
+        "players": [
+            {
+                "goal_visible": True,
+                "is_human": True,
+                "player_name": "human",
+                "rewards": {},
+                "timestep_skip": 1,
+            }
+        ],
+        "random_start_locations": False,
+        "randomize_first_episode_length": False,
+        "rewards": {
+            "action": 0,
+            "get_resources": 0,
+            "incorrect_action": 0,
+            "noop": 0,
+            "own_reward_prop": 0,
+            "place_wrong": -1,
+        },
+        "truncate_on_no_progress_timesteps": None,
+        "world_size": (11, 10, 10),
+    }
+    num_episodes = 1  # noqa: F841
+    policy_ids = [None]  # noqa: F841
+    checkpoints = [None]  # noqa: F841
+    algorithm_config_updates = [{}]  # type: ignore  # noqa: F841
+    use_malmo = True  # noqa: F841
+    record_video = True  # noqa: F841
+
+
+@ex.named_config
+def human_study_human_assistant():
+    runs = ["HumanAgent", "HumanAgent"]  # noqa: F841
+    house_id = None  # noqa: F841
+    env_config_updates = {  # noqa: F841
+        "num_players": 2,
+        "players": [
+            {
+                "goal_visible": False,
+                "is_human": True,
+                "player_name": "assistant",
+                "rewards": {},
+                "timestep_skip": 1,
+            },
+            {
+                "goal_visible": True,
+                "is_human": True,
+                "player_name": "human",
+                "rewards": {},
+                "timestep_skip": 1,
+            },
+        ],
+    }
+    policy_ids = [None, None]  # noqa: F841
+    checkpoints = [None, None]  # noqa: F841
+    algorithm_config_updates = [{}, {}]  # type: ignore  # noqa: F841
+
+
+@ex.named_config
+def human_study_alphazero_assistant():
+    runs = ["MbagAlphaZero", "HumanAgent"]  # noqa: F841
+    house_id = None  # noqa: F841
+    env_config_updates = {  # noqa: F841
+        "num_players": 2,
+        "players": [
+            {
+                "goal_visible": False,
+                "is_human": False,
+                "player_name": "assistant",
+                "rewards": {},
+                "timestep_skip": 1,
+            },
+            {
+                "goal_visible": True,
+                "is_human": True,
+                "player_name": "human",
+                "rewards": {},
+                "timestep_skip": 1,
+            },
+        ],
+    }
+    assistant_checkpoint = ""
+    num_simulations = 20
+    expected_reward_shift = 0
+    policy_ids = ["assistant", None]  # noqa: F841
+    checkpoints = [assistant_checkpoint, None]  # noqa: F841
+    algorithm_config_updates = [  # noqa: F841
+        {
+            "num_gpus_per_worker": 0,
+            "player_index": 0,
+            "mcts_config": {"num_simulations": num_simulations},
+            "expected_reward_shift": expected_reward_shift,
+        },
+        {},
+    ]
+    min_action_interval = 0.8  # noqa: F841
+
+
+@ex.named_config
+def human_study_bc_assistant():
+    runs = ["BC", "HumanAgent"]  # noqa: F841
+    house_id = None  # noqa: F841
+    env_config_updates = {  # noqa: F841
+        "num_players": 2,
+        "players": [
+            {
+                "goal_visible": False,
+                "is_human": False,
+                "player_name": "assistant",
+                "rewards": {},
+                "timestep_skip": 1,
+            },
+            {
+                "goal_visible": True,
+                "is_human": True,
+                "player_name": "human",
+                "rewards": {},
+                "timestep_skip": 1,
+            },
+        ],
+    }
+    assistant_checkpoint = ""
+    policy_ids = ["assistant", None]  # noqa: F841
+    checkpoints = [assistant_checkpoint, None]  # noqa: F841
+    algorithm_config_updates = [{}, {}]  # type: ignore  # noqa: F841
+    temperatures = [0.3, 1.0]  # noqa: F841
+    min_action_interval = 0.8  # noqa: F841
+
+
 def run_evaluation(
     *,
     runs: List[str],
@@ -164,6 +346,8 @@ def run_evaluation(
     min_action_interval: float,
     explore: List[bool],
     confidence_thresholds: Optional[List[Optional[float]]],
+    temperatures: List[float],
+    env_config: Optional[MbagConfigDict],
     env_config_updates: MbagConfigDict,
     algorithm_config_updates: List[dict],
     agent_config_updates: List[dict],
@@ -179,7 +363,6 @@ def run_evaluation(
     env_config_updates.setdefault("randomize_first_episode_length", False)
 
     # Try to load env config from the first checkpoint.
-    env_config: Optional[MbagConfigDict] = None
     for checkpoint in checkpoints:
         if checkpoint is not None:
             config = load_trainer_config(checkpoint)
@@ -238,6 +421,7 @@ def run_evaluation(
                 agent_config["confidence_threshold"] = confidence_thresholds[
                     player_index
                 ]
+            agent_config["temperature"] = temperatures[player_index]
             if "AlphaZero" in run:
                 mbag_agent_class = RllibAlphaZeroAgent
                 agent_config["player_index"] = player_index
@@ -281,6 +465,8 @@ def evaluation_worker(
     min_action_interval: float,
     explore: List[bool],
     confidence_thresholds: Optional[List[Optional[float]]],
+    temperatures: List[float],
+    env_config: Optional[MbagConfigDict],
     env_config_updates: MbagConfigDict,
     algorithm_config_updates: List[dict],
     agent_config_updates: List[dict],
@@ -299,6 +485,8 @@ def evaluation_worker(
                 min_action_interval=min_action_interval,
                 explore=explore,
                 confidence_thresholds=confidence_thresholds,
+                temperatures=temperatures,
+                env_config=env_config,
                 env_config_updates=env_config_updates,
                 algorithm_config_updates=algorithm_config_updates,
                 agent_config_updates=agent_config_updates,
@@ -317,10 +505,18 @@ def evaluation_worker(
 
 def queue_episode_generator(
     queues: List[mp.Queue],
+    processes: List[mp.Process],
 ) -> Generator[Union[MbagEpisode, Exception], Any, Any]:
     while True:
-        for queue in queues:
-            yield queue.get()
+        for queue, process in zip(queues, processes):
+            got_episode = False
+            while not got_episode:
+                try:
+                    yield queue.get(timeout=1)
+                    got_episode = True
+                except Empty:
+                    if not process.is_alive():
+                        raise RuntimeError("Worker process died")
 
 
 @ex.automain
@@ -331,8 +527,10 @@ def main(  # noqa: C901
     min_action_interval: float,
     explore: List[bool],
     confidence_thresholds: Optional[List[Optional[float]]],
+    temperatures: List[float],
     num_episodes: int,
     experiment_tag: str,
+    env_config: Optional[MbagConfigDict],
     env_config_updates: MbagConfigDict,
     algorithm_config_updates: List[dict],
     agent_config_updates: List[dict],
@@ -362,6 +560,8 @@ def main(  # noqa: C901
             min_action_interval=min_action_interval,
             explore=explore,
             confidence_thresholds=confidence_thresholds,
+            temperatures=temperatures,
+            env_config=env_config,
             env_config_updates=env_config_updates,
             algorithm_config_updates=algorithm_config_updates,
             agent_config_updates=agent_config_updates,
@@ -390,6 +590,8 @@ def main(  # noqa: C901
                     "min_action_interval": min_action_interval,
                     "explore": explore,
                     "confidence_thresholds": confidence_thresholds,
+                    "temperatures": temperatures,
+                    "env_config": env_config,
                     "env_config_updates": env_config_updates,
                     "algorithm_config_updates": algorithm_config_updates,
                     "agent_config_updates": agent_config_updates,
@@ -404,7 +606,7 @@ def main(  # noqa: C901
             processes.append(process)
             queues.append(queue)
             time.sleep(1)
-        episode_generator = queue_episode_generator(queues)
+        episode_generator = queue_episode_generator(queues, processes)
 
     episodes: List[MbagEpisode] = []
     episode_metrics: List[MbagEpisodeMetrics] = []

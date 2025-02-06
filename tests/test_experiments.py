@@ -8,7 +8,7 @@ import glob
 import json
 import logging
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Collection, Dict, List, Optional, Tuple
 
 import pytest
 
@@ -19,6 +19,7 @@ try:
 
     from mbag.scripts.evaluate import ex as evaluate_ex
     from mbag.scripts.evaluate_human_modeling import ex as evaluate_human_modeling_ex
+    from mbag.scripts.rollout import ex as rollout_ex
     from mbag.scripts.train import ex as train_ex
 except ImportError:
     pass
@@ -40,6 +41,7 @@ def assert_config_matches(
     experiment_dir,
     reference_experiment_dir,
     overwrite=False,
+    ignore_keys: Collection[str] = [],
 ):
     with open(os.path.join(experiment_dir, "config.json")) as config_file:
         json_config = json.load(config_file)
@@ -65,6 +67,10 @@ def assert_config_matches(
         # Don't report inconsistencies in the number of GPUs.
         del config["num_gpus"]
         del config["num_gpus_per_worker"]
+
+        for key in ignore_keys:
+            if key in config:
+                del config[key]
 
         # Weird inconsistent JSON serialization.
         for policy_id, policy_spec in config["policies"].items():
@@ -158,11 +164,10 @@ def test_experiments(tmp_path):
         },
     ).result
     assert alphazero_human_result is not None
-    # TODO: update
-    # assert_config_matches(
-    #     glob.glob(str(tmp_path / "alphazero_human" / "[1-9]*"))[0],
-    #     "data/testing/reference_experiments/alphazero_human",
-    # )
+    assert_config_matches(
+        glob.glob(str(tmp_path / "alphazero_human" / "[1-9]*"))[0],
+        "data/testing/reference_experiments/alphazero_human",
+    )
 
     # Test bc_human
     bc_human_results: Dict[str, Any] = {}
@@ -171,8 +176,6 @@ def test_experiments(tmp_path):
         ("rand_init_human_alone", "human_alone", None),
         ("rand_init_human_with_assistant", "human_with_assistant", None),
         ("rand_init_combined", "combined", None),
-        ("ppo_init", "human_alone", ppo_human_result["final_checkpoint"]),
-        ("alphazero_init", "human_alone", alphazero_human_result["final_checkpoint"]),
     ]:
         experiment_dir = tmp_path / f"bc_human_{bc_human_name}"
         bc_human_result = train_ex.run(
@@ -193,23 +196,23 @@ def test_experiments(tmp_path):
         bc_human_data_splits[bc_human_name] = data_split
 
     # Test piKL
-    # TODO: update
-    # pikl_result = train_ex.run(
-    #     named_configs=["pikl"],
-    #     config_updates={
-    #         "checkpoint_to_load_policies": bc_human_results["rand_init_human_alone"][
-    #             "final_checkpoint"
-    #         ],
-    #         "checkpoint_name": "rand_init_human_alone",
-    #         "experiment_dir": str(tmp_path / "pikl"),
-    #         **common_config_updates,
-    #     },
-    # ).result
-    # assert pikl_result is not None
-    # assert_config_matches(
-    #     glob.glob(str(tmp_path / "pikl" / "[1-9]*"))[0],
-    #     "data/testing/reference_experiments/pikl",
-    # )
+    pikl_result = train_ex.run(
+        named_configs=["pikl"],
+        config_updates={
+            "checkpoint_to_load_policies": bc_human_results["rand_init_combined"][
+                "final_checkpoint"
+            ],
+            "checkpoint_name": "rand_init_combined",
+            "experiment_dir": str(tmp_path / "pikl"),
+            "num_players": 2,
+            **common_config_updates,
+        },
+    ).result
+    assert pikl_result is not None
+    assert_config_matches(
+        glob.glob(str(tmp_path / "pikl" / "[1-9]*"))[0],
+        "data/testing/reference_experiments/pikl",
+    )
 
     # Test all human model evals
     human_models: List[Tuple[str, str, Optional[str]]] = (
@@ -225,10 +228,9 @@ def test_experiments(tmp_path):
             )
             for bc_human_name, bc_human_result in bc_human_results.items()
         ]
-        # TODO: uncomment when piKL is updated
-        # + [
-        #     ("MbagAlphaZero", pikl_result["final_checkpoint"], "human_alone"),
-        # ]
+        + [
+            ("MbagAlphaZero", pikl_result["final_checkpoint"], "combined"),
+        ]
     )
     for human_model_run, human_model_checkpoint, human_model_data_split in human_models:
         extra_config_updates = {}
@@ -257,6 +259,11 @@ def test_experiments(tmp_path):
                         if human_model_data_split in ["human_alone", None]
                         else "_inventory_0_1"
                     ),
+                    "minibatch_size": (
+                        1
+                        if human_model_checkpoint == pikl_result["final_checkpoint"]
+                        else 128
+                    ),
                 },
             ).result
             assert evaluate_human_modeling_result is not None
@@ -282,42 +289,95 @@ def test_experiments(tmp_path):
         ).result
         assert evaluate_result is not None
 
-    # Test alphazero_assistant
-    alphazero_assistant_result = train_ex.run(
-        named_configs=["alphazero_assistant"],
+    # Test assistancezero_assistant
+    assistancezero_assistant_result = train_ex.run(
+        named_configs=["assistancezero_assistant"],
         config_updates={
-            "experiment_dir": str(tmp_path / "alphazero_assistant"),
-            "checkpoint_to_load_policies": bc_human_results["rand_init_combined"][
-                "final_checkpoint"
-            ],
-            "checkpoint_name": "rand_init_combined",
+            "experiment_dir": str(tmp_path / "assistancezero_assistant"),
+            "checkpoint_to_load_policies": pikl_result["final_checkpoint"],
+            "checkpoint_name": "pikl",
             **common_config_updates,
         },
     ).result
-    assert alphazero_assistant_result is not None
+    assert assistancezero_assistant_result is not None
     assert_config_matches(
-        glob.glob(str(tmp_path / "alphazero_assistant" / "[1-9]*"))[0],
-        "data/testing/reference_experiments/alphazero_assistant",
+        glob.glob(str(tmp_path / "assistancezero_assistant" / "[1-9]*"))[0],
+        "data/testing/reference_experiments/assistancezero_assistant",
     )
 
     # Test ppo_assistant
-    ppo_assistant_result = train_ex.run(
-        named_configs=["ppo_assistant"],
+    # TODO: add config
+    # ppo_assistant_result = train_ex.run(
+    #     named_configs=["ppo_assistant"],
+    #     config_updates={
+    #         "experiment_dir": str(tmp_path / "ppo_assistant"),
+    #         "checkpoint_to_load_policies": bc_human_results["rand_init_human_alone"][
+    #             "final_checkpoint"
+    #         ],
+    #         "checkpoint_name": "rand_init_human_alone",
+    #         **common_config_updates,
+    #     },
+    # ).result
+    # assert ppo_assistant_result is not None
+    # assert_config_matches(
+    #     glob.glob(str(tmp_path / "ppo_assistant" / "[1-9]*"))[0],
+    #     "data/testing/reference_experiments/ppo_assistant",
+    # )
+
+    # Test pretrained_assistant
+    rollout_result = rollout_ex.run(
         config_updates={
-            "experiment_dir": str(tmp_path / "ppo_assistant"),
-            "checkpoint_to_load_policies": bc_human_results["rand_init_human_alone"][
-                "final_checkpoint"
-            ],
-            "checkpoint_name": "rand_init_human_alone",
+            "run": "BC",
+            "checkpoint": bc_human_results["rand_init_combined"]["final_checkpoint"],
+            "policy_ids": ["human"],
+            "num_episodes": 1,
+            "num_workers": 0,
+            "config_updates": {
+                "num_envs_per_worker": 1,
+            },
+            "save_samples": True,
+            "save_as_sequences": True,
+            "max_seq_len": 64,
+            "experiment_name": "1_episode",
+        }
+    ).result
+    assert rollout_result is not None
+    rollout_dir = glob.glob(
+        os.path.join(
+            bc_human_results["rand_init_combined"]["final_checkpoint"],
+            "rollouts_1_episode_*",
+        )
+    )
+    pretrained_assistant_result = train_ex.run(
+        named_configs=["pretrained_assistant"],
+        config_updates={
+            "experiment_dir": str(tmp_path / "pretrained_assistant"),
+            "checkpoint_name": "rand_init_combined",
+            "input": rollout_dir,
             **common_config_updates,
         },
     ).result
-    assert ppo_assistant_result is not None
+    assert pretrained_assistant_result is not None
     assert_config_matches(
-        glob.glob(str(tmp_path / "ppo_assistant" / "[1-9]*"))[0],
-        "data/testing/reference_experiments/ppo_assistant",
+        glob.glob(str(tmp_path / "pretrained_assistant" / "[1-9]*"))[0],
+        "data/testing/reference_experiments/pretrained_assistant",
+        ignore_keys=["input_"],
     )
 
-    # TODO: test human_rollout
-    # TODO: test masked_bc_human
-    # TODO: test bc_assistant
+    # Test sft_assistant
+    sft_assistant_result = train_ex.run(
+        named_configs=["sft_assistant"],
+        config_updates={
+            "experiment_dir": str(tmp_path / "sft_assistant"),
+            "checkpoint_to_load_policies": pretrained_assistant_result[
+                "final_checkpoint"
+            ],
+            "checkpoint_name": "pretrained",
+            **common_config_updates,
+        },
+    ).result
+    assert sft_assistant_result is not None
+    assert_config_matches(
+        glob.glob(str(tmp_path / "sft_assistant" / "[1-9]*"))[0],
+        "data/testing/reference_experiments/sft_assistant",
+    )

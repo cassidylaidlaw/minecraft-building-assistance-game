@@ -122,6 +122,7 @@ def load_policies_from_checkpoint(
     checkpoint_dir: str,
     trainer: Algorithm,
     policy_map: Callable[[PolicyID], Optional[PolicyID]] = lambda policy_id: policy_id,
+    should_load_param: Callable[[str], bool] = lambda param_name: True,
 ):
     """
     Load policy model weights from a checkpoint and copy them into the given
@@ -152,7 +153,17 @@ def load_policies_from_checkpoint(
         if loaded_policy_id not in policy_states:
             raise ValueError(f"Policy {loaded_policy_id} not found in checkpoint")
 
-        policy_weights[policy_id] = policy_states[loaded_policy_id]["weights"]
+        current_weights = trainer.get_policy(policy_id).get_weights()
+        policy_weights[policy_id] = {
+            weight_name: (
+                weight
+                if should_load_param(weight_name)
+                else current_weights[weight_name]
+            )
+            for weight_name, weight in policy_states[loaded_policy_id][
+                "weights"
+            ].items()
+        }
 
     def copy_policy_weights(policy: Policy, policy_id: PolicyID):
         if policy_id in policy_weights:

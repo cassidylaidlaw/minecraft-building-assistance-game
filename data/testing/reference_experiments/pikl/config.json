@@ -1,25 +1,8 @@
 {
+  "_no_train": false,
   "action_reward": 0,
   "action_space": {
-    "_np_random": null,
-    "_shape": {
-      "py/tuple": []
-    },
-    "dtype": {
-      "dtype": "int64",
-      "py/object": "numpy.dtype[int64]"
-    },
-    "n": {
-      "dtype": "int64",
-      "py/object": "numpy.int64",
-      "value": 12107
-    },
-    "py/object": "gymnasium.spaces.discrete.Discrete",
-    "start": {
-      "dtype": "int64",
-      "py/object": "numpy.int64",
-      "value": 0
-    }
+    "py/id": 101
   },
   "add_dirichlet_noise": false,
   "anchor_policy_kl_coeff": 0.0,
@@ -35,10 +18,16 @@
     "scale_y_independently": true
   },
   "argmax_tree_policy": false,
+  "attention_resolutions": [],
   "batch_mode": "truncate_episodes",
-  "checkpoint_name": null,
+  "channel_mult": [
+    1,
+    2,
+    4
+  ],
+  "checkpoint_name": "bc_combined_lstm_prev_action_20250113_40",
   "checkpoint_path": null,
-  "checkpoint_to_load_policies": "/nas/ucb/ebronstein/minecraft-building-assistance-game/data/logs/BC/self_play/11x10x10/craftassist/teleportation_False/inf_blocks_True/split_human_alone/lr_0.001/seed_0/361299/2024-06-04_03-19-30/1/checkpoint_000020",
+  "checkpoint_to_load_policies": "/nas/ucb/cassidy/minecraft-building-assistance-game/data/logs/BC/2_players/11x10x10/craftassist/bc_human/lr_0.001/infinite_blocks_true/combined/lstm/use_prev_action/2025-01-13_00-47-16/1/checkpoint_000040",
   "checkpoint_to_load_policies_config": {
     "_AlgorithmConfig__prior_exploration_config": null,
     "_disable_action_flattening": false,
@@ -74,7 +63,7 @@
     "custom_evaluation_function": null,
     "custom_resources_per_worker": {},
     "data_augmentation": {
-      "py/function": "__main__.data_augmentation"
+      "py/function": "mbag.scripts.train.data_augmentation"
     },
     "delay_between_worker_restarts_s": 60.0,
     "disable_env_checking": false,
@@ -161,12 +150,18 @@
       "malmo": {
         "use_malmo": false
       },
-      "num_players": 1,
+      "num_players": 2,
       "players": [
         {
           "goal_visible": true,
           "is_human": false,
           "player_name": "human",
+          "rewards": {},
+          "timestep_skip": 1
+        },
+        {
+          "goal_visible": true,
+          "is_human": false,
           "rewards": {},
           "timestep_skip": 1
         }
@@ -176,6 +171,7 @@
       "rewards": {
         "action": 0,
         "get_resources": 0,
+        "incorrect_action": 0,
         "noop": 0,
         "own_reward_prop": 0,
         "place_wrong": -1
@@ -191,6 +187,15 @@
     "env_task_fn": null,
     "evaluation_config": {
       "env_config": {
+        "num_players": 1,
+        "players": [
+          {
+            "goal_visible": true,
+            "is_human": false,
+            "rewards": {},
+            "timestep_skip": 1
+          }
+        ],
         "randomize_first_episode_length": false
       },
       "explore": true,
@@ -198,7 +203,7 @@
     },
     "evaluation_duration": 64,
     "evaluation_duration_unit": "episodes",
-    "evaluation_interval": 1,
+    "evaluation_interval": null,
     "evaluation_num_episodes": -1,
     "evaluation_num_workers": 8,
     "evaluation_parallel_to_training": false,
@@ -217,7 +222,7 @@
     "grad_clip_by": "global_norm",
     "ignore_worker_failures": false,
     "in_evaluation": false,
-    "input_": "/nas/ucb/cassidy/minecraft-building-assistance-game/data/human_data_cleaned/human_alone/infinite_blocks_true/rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_0",
+    "input_": "data/human_data_cleaned/combined/infinite_blocks_true/rllib_with_own_noops_flat_actions_flat_observations_place_wrong_reward_-1_repaired_player_0_inventory_0_1_seq_64",
     "input_config": {},
     "input_evaluation": -1,
     "keep_per_episode_custom_metrics": false,
@@ -238,7 +243,7 @@
         0.001
       ],
       [
-        96420,
+        388020.0,
         0.0001
       ]
     ],
@@ -318,7 +323,9 @@
     "off_policy_estimation_methods": {},
     "offline_sampling": false,
     "ope_split_batch_by_episode": true,
-    "optimizer": {},
+    "optimizer": {
+      "weight_decay": 0
+    },
     "output": null,
     "output_compress_columns": [
       "obs",
@@ -406,86 +413,52 @@
                   "_np_random": null,
                   "_shape": {
                     "py/tuple": [
-                      1,
+                      2,
                       10
                     ]
                   },
                   "bounded_above": {
                     "dtype": "bool",
                     "py/object": "numpy.ndarray",
-                    "values": [
-                      [
-                        true,
-                        true,
-                        true,
-                        true,
-                        true,
-                        true,
-                        true,
-                        true,
-                        true,
-                        true
-                      ]
-                    ]
+                    "shape": [
+                      2,
+                      10
+                    ],
+                    "values": "eJxjZMQEAADmABU="
                   },
                   "bounded_below": {
                     "dtype": "bool",
                     "py/object": "numpy.ndarray",
-                    "values": [
-                      [
-                        true,
-                        true,
-                        true,
-                        true,
-                        true,
-                        true,
-                        true,
-                        true,
-                        true,
-                        true
-                      ]
-                    ]
+                    "shape": [
+                      2,
+                      10
+                    ],
+                    "values": "eJxjZMQEAADmABU="
                   },
                   "dtype": {
                     "dtype": "int32",
                     "py/object": "numpy.dtype[int32]"
                   },
                   "high": {
+                    "byteorder": "<",
                     "dtype": "int32",
                     "py/object": "numpy.ndarray",
-                    "values": [
-                      [
-                        2304,
-                        2304,
-                        2304,
-                        2304,
-                        2304,
-                        2304,
-                        2304,
-                        2304,
-                        2304,
-                        2304
-                      ]
-                    ]
+                    "shape": [
+                      2,
+                      10
+                    ],
+                    "values": "eJxj4GRgYKAiBgAdJAC1"
                   },
                   "high_repr": "2304",
                   "low": {
+                    "byteorder": "<",
                     "dtype": "int32",
                     "py/object": "numpy.ndarray",
-                    "values": [
-                      [
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0
-                      ]
-                    ]
+                    "shape": [
+                      2,
+                      10
+                    ],
+                    "values": "eJxjYKAuAAAAUAAB"
                   },
                   "low_repr": "0",
                   "py/object": "gymnasium.spaces.box.Box"
@@ -496,13 +469,13 @@
                     "py/tuple": []
                   },
                   "bounded_above": {
-                    "py/id": 67
+                    "py/id": 61
                   },
                   "bounded_below": {
-                    "py/id": 67
+                    "py/id": 61
                   },
                   "dtype": {
-                    "py/id": 310
+                    "py/id": 363
                   },
                   "high": {
                     "dtype": "int32",
@@ -522,10 +495,10 @@
             }
           },
           {
-            "py/id": 70
+            "py/id": 64
           },
           {
-            "py/id": 74
+            "py/id": 68
           }
         ]
       }
@@ -533,6 +506,9 @@
     "policies_to_train": null,
     "policy_map_cache": -1,
     "policy_map_capacity": 100,
+    "policy_mapping_fn": {
+      "py/function": "mbag.scripts.train.policy_mapping_fn"
+    },
     "policy_states_are_swappable": false,
     "postprocess_inputs": false,
     "preprocessor_pref": "deepmind",
@@ -584,11 +560,12 @@
     "torch_compile_worker": false,
     "torch_compile_worker_dynamo_backend": "onnxrt",
     "torch_compile_worker_dynamo_mode": null,
-    "train_batch_size": 9642,
+    "train_batch_size": 19401,
     "update_worker_filter_stats": true,
     "use_worker_filter_stats": true,
     "validate_workers_after_construction": true,
     "validation_participant_ids": [],
+    "validation_prop": 0,
     "vf_loss_coeff": 0,
     "worker_cls": -1,
     "worker_health_probe_timeout_s": 60,
@@ -644,18 +621,14 @@
     "enable_tf1_exec_eagerly": false,
     "entropy_coeff": 0,
     "entropy_coeff_schedule": [
-      {
-        "py/tuple": [
-          0,
-          0
-        ]
-      },
-      {
-        "py/tuple": [
-          100000.0,
-          0
-        ]
-      }
+      [
+        0,
+        0
+      ],
+      [
+        100000.0,
+        0
+      ]
     ],
     "env": "MBAGFlatActions-v1",
     "env_config": {
@@ -734,12 +707,19 @@
       "malmo": {
         "use_malmo": false
       },
-      "num_players": 1,
+      "num_players": 2,
       "players": [
         {
           "goal_visible": true,
           "is_human": false,
           "player_name": "human",
+          "rewards": {},
+          "timestep_skip": 1
+        },
+        {
+          "goal_visible": true,
+          "is_human": false,
+          "player_name": "assistant",
           "rewards": {},
           "timestep_skip": 1
         }
@@ -765,8 +745,14 @@
     "env_task_fn": null,
     "evaluation_config": {
       "env_config": {
-        "num_players": 1,
+        "num_players": 2,
         "players": [
+          {
+            "goal_visible": true,
+            "is_human": false,
+            "rewards": {},
+            "timestep_skip": 1
+          },
           {
             "goal_visible": true,
             "is_human": false,
@@ -787,11 +773,12 @@
         "explore_noops": false,
         "fix_bilevel_action_selection": true,
         "init_q_with_max": false,
-        "num_simulations": 100,
+        "num_simulations": 30,
         "predict_goal_using_average": false,
+        "predict_goal_using_future_states": false,
         "predict_goal_using_next_state": false,
         "prior_temperature": 1,
-        "puct_coefficient": 10,
+        "puct_coefficient": 30,
         "sample_c_puct_every_timestep": true,
         "sample_from_full_support_policy": true,
         "store_model_state_in_torch": false,
@@ -807,6 +794,8 @@
     "evaluation_num_workers": 0,
     "evaluation_parallel_to_training": false,
     "evaluation_sample_timeout_s": 180.0,
+    "expected_own_reward_scale": 1.0,
+    "expected_reward_shift": 0.0,
     "exploration_config": {
       "type": "StochasticSampling"
     },
@@ -840,6 +829,7 @@
     "lr_schedule": null,
     "max_num_worker_restarts": 1000,
     "max_requests_in_flight_per_sampler_worker": 2,
+    "mcts_batch_size": null,
     "mcts_config": {
       "add_dirichlet_noise": false,
       "argmax_tree_policy": false,
@@ -849,11 +839,12 @@
       "explore_noops": false,
       "fix_bilevel_action_selection": true,
       "init_q_with_max": false,
-      "num_simulations": 100,
+      "num_simulations": 30,
       "predict_goal_using_average": false,
+      "predict_goal_using_future_states": false,
       "predict_goal_using_next_state": false,
       "prior_temperature": 1,
-      "puct_coefficient": 10,
+      "puct_coefficient": 30,
       "sample_c_puct_every_timestep": true,
       "sample_from_full_support_policy": true,
       "store_model_state_in_torch": false,
@@ -920,10 +911,13 @@
       "capacity": 10,
       "replay_sequence_length": 0,
       "replay_sequence_override": false,
+      "replay_zero_init_states": false,
       "storage_unit": {
-        "py/id": 45
+        "py/id": 152
       },
-      "type": "MultiAgentReplayBuffer",
+      "type": {
+        "py/type": "mbag.rllib.alpha_zero.replay_buffer.FixedMultiAgentReplayBuffer"
+      },
       "underlying_buffer_config": {
         "storage_probability": 0.1,
         "type": {
@@ -966,6 +960,181 @@
     "placement_strategy": "PACK",
     "player_index": null,
     "policies": {
+      "assistant": {
+        "action_space": {
+          "_np_random": null,
+          "_shape": {
+            "py/tuple": []
+          },
+          "dtype": {
+            "dtype": "int64",
+            "py/object": "numpy.dtype[int64]"
+          },
+          "n": {
+            "dtype": "int64",
+            "py/object": "numpy.int64",
+            "value": 12107
+          },
+          "py/object": "gymnasium.spaces.discrete.Discrete",
+          "start": {
+            "dtype": "int64",
+            "py/object": "numpy.int64",
+            "value": 0
+          }
+        },
+        "config": {
+          "goal_loss_coeff": 0.5,
+          "model": {
+            "custom_action_dist": "categorical_no_inf",
+            "custom_model": "mbag_convolutional_model",
+            "custom_model_config": {
+              "dropout": 0.0,
+              "embedding_size": 16,
+              "env_config": {
+                "abilities": {
+                  "flying": true,
+                  "inf_blocks": true,
+                  "teleportation": false
+                },
+                "goal_generator": {
+                  "py/type": "mbag.environment.goals.goal_transform.TransformedGoalGenerator"
+                },
+                "goal_generator_config": {
+                  "goal_generator": "craftassist",
+                  "goal_generator_config": {
+                    "subset": "test"
+                  },
+                  "transforms": [
+                    {
+                      "config": {
+                        "connectivity": 18
+                      },
+                      "transform": "largest_cc"
+                    },
+                    {
+                      "transform": "crop_air"
+                    },
+                    {
+                      "config": {
+                        "density_threshold": 0.1
+                      },
+                      "transform": "crop_low_density_bottom_layers"
+                    },
+                    {
+                      "config": {
+                        "min_size": [
+                          4,
+                          4,
+                          4
+                        ]
+                      },
+                      "transform": "min_size_filter"
+                    },
+                    {
+                      "config": {
+                        "interpolate": true,
+                        "interpolation_order": 1,
+                        "max_scaling_factor": 2,
+                        "max_scaling_factor_ratio": 1.5,
+                        "preserve_paths": true,
+                        "scale_y_independently": true
+                      },
+                      "transform": "area_sample"
+                    },
+                    {
+                      "config": {
+                        "max_density": 1,
+                        "min_density": 0
+                      },
+                      "transform": "density_filter"
+                    },
+                    {
+                      "transform": "randomly_place"
+                    },
+                    {
+                      "transform": "add_grass"
+                    },
+                    {
+                      "config": {
+                        "connectivity": 18
+                      },
+                      "transform": "single_cc_filter"
+                    }
+                  ]
+                },
+                "horizon": 1500,
+                "malmo": {
+                  "use_malmo": false
+                },
+                "num_players": 2,
+                "players": [
+                  {
+                    "goal_visible": true,
+                    "is_human": false,
+                    "player_name": "human",
+                    "rewards": {},
+                    "timestep_skip": 1
+                  },
+                  {
+                    "goal_visible": true,
+                    "is_human": false,
+                    "player_name": "assistant",
+                    "rewards": {},
+                    "timestep_skip": 1
+                  }
+                ],
+                "random_start_locations": true,
+                "randomize_first_episode_length": true,
+                "rewards": {
+                  "action": 0,
+                  "get_resources": 0,
+                  "incorrect_action": 0,
+                  "noop": 0,
+                  "own_reward_prop": 0,
+                  "place_wrong": -1
+                },
+                "truncate_on_no_progress_timesteps": null,
+                "world_size": [
+                  11,
+                  10,
+                  10
+                ]
+              },
+              "filter_size": 5,
+              "hidden_channels": 64,
+              "hidden_size": 64,
+              "interleave_lstm_every": -1,
+              "line_of_sight_masking": true,
+              "lstm_size": 64,
+              "mask_action_distribution": true,
+              "mask_goal": false,
+              "mask_other_players": false,
+              "num_action_layers": 2,
+              "num_conv_1_layers": 1,
+              "num_inventory_obs": 2,
+              "num_layers": 6,
+              "num_value_layers": 2,
+              "scale_obs": true,
+              "use_extra_features": true,
+              "use_fc_after_embedding": true,
+              "use_groupnorm": false,
+              "use_prev_action": false,
+              "use_prev_blocks": false,
+              "use_resnet": true,
+              "vf_scale": 1.0
+            },
+            "max_seq_len": 1500,
+            "vf_share_layers": true
+          }
+        },
+        "observation_space": {
+          "py/id": 47
+        },
+        "policy_class": {
+          "py/type": "mbag.rllib.alpha_zero.alpha_zero_policy.MbagAlphaZeroPolicy"
+        },
+        "py/object": "ray.rllib.policy.policy.PolicySpec"
+      },
       "human": {
         "action_space": {
           "_np_random": null,
@@ -992,9 +1161,9 @@
           "goal_loss_coeff": 0.5,
           "model": {
             "custom_action_dist": "categorical_no_inf",
-            "custom_model": "mbag_transformer_model",
+            "custom_model": "mbag_convolutional_model",
             "custom_model_config": {
-              "dim_feedforward": 64,
+              "dropout": 0.7,
               "embedding_size": 16,
               "env_config": {
                 "abilities": {
@@ -1072,12 +1241,18 @@
                 "malmo": {
                   "use_malmo": false
                 },
-                "num_players": 1,
+                "num_players": 2,
                 "players": [
                   {
                     "goal_visible": true,
                     "is_human": false,
                     "player_name": "human",
+                    "rewards": {},
+                    "timestep_skip": 1
+                  },
+                  {
+                    "goal_visible": true,
+                    "is_human": false,
                     "rewards": {},
                     "timestep_skip": 1
                   }
@@ -1099,33 +1274,30 @@
                   10
                 ]
               },
-              "fix_interleave_lstm": true,
+              "filter_size": 5,
+              "hidden_channels": 64,
               "hidden_size": 64,
-              "interleave_lstm": false,
+              "interleave_lstm_every": 4,
               "line_of_sight_masking": true,
-              "lstm_depth": null,
+              "lstm_size": 64,
               "mask_action_distribution": true,
               "mask_goal": false,
-              "mask_other_players": true,
-              "norm_first": false,
+              "mask_other_players": false,
               "num_action_layers": 2,
-              "num_heads": 4,
-              "num_inventory_obs": 1,
-              "num_layers": 6,
-              "num_lstm_layers": 1,
+              "num_conv_1_layers": 1,
+              "num_inventory_obs": 2,
+              "num_layers": 8,
               "num_value_layers": 2,
-              "position_embedding_angle": 10,
-              "position_embedding_size": 48,
               "scale_obs": true,
               "use_extra_features": true,
               "use_fc_after_embedding": true,
-              "use_per_location_lstm": false,
-              "use_prev_action": false,
+              "use_groupnorm": false,
+              "use_prev_action": true,
               "use_prev_blocks": false,
-              "use_separated_transformer": true,
+              "use_resnet": true,
               "vf_scale": 1.0
             },
-            "max_seq_len": 1500,
+            "max_seq_len": 64,
             "vf_share_layers": true
           }
         },
@@ -1202,86 +1374,52 @@
                 "_np_random": null,
                 "_shape": {
                   "py/tuple": [
-                    1,
+                    2,
                     10
                   ]
                 },
                 "bounded_above": {
                   "dtype": "bool",
                   "py/object": "numpy.ndarray",
-                  "values": [
-                    [
-                      true,
-                      true,
-                      true,
-                      true,
-                      true,
-                      true,
-                      true,
-                      true,
-                      true,
-                      true
-                    ]
-                  ]
+                  "shape": [
+                    2,
+                    10
+                  ],
+                  "values": "eJxjZMQEAADmABU="
                 },
                 "bounded_below": {
                   "dtype": "bool",
                   "py/object": "numpy.ndarray",
-                  "values": [
-                    [
-                      true,
-                      true,
-                      true,
-                      true,
-                      true,
-                      true,
-                      true,
-                      true,
-                      true,
-                      true
-                    ]
-                  ]
+                  "shape": [
+                    2,
+                    10
+                  ],
+                  "values": "eJxjZMQEAADmABU="
                 },
                 "dtype": {
                   "dtype": "int32",
                   "py/object": "numpy.dtype[int32]"
                 },
                 "high": {
+                  "byteorder": "<",
                   "dtype": "int32",
                   "py/object": "numpy.ndarray",
-                  "values": [
-                    [
-                      2304,
-                      2304,
-                      2304,
-                      2304,
-                      2304,
-                      2304,
-                      2304,
-                      2304,
-                      2304,
-                      2304
-                    ]
-                  ]
+                  "shape": [
+                    2,
+                    10
+                  ],
+                  "values": "eJxj4GRgYKAiBgAdJAC1"
                 },
                 "high_repr": "2304",
                 "low": {
+                  "byteorder": "<",
                   "dtype": "int32",
                   "py/object": "numpy.ndarray",
-                  "values": [
-                    [
-                      0,
-                      0,
-                      0,
-                      0,
-                      0,
-                      0,
-                      0,
-                      0,
-                      0,
-                      0
-                    ]
-                  ]
+                  "shape": [
+                    2,
+                    10
+                  ],
+                  "values": "eJxjYKAuAAAAUAAB"
                 },
                 "low_repr": "0",
                 "py/object": "gymnasium.spaces.box.Box"
@@ -1292,7 +1430,7 @@
                   "py/tuple": []
                 },
                 "bounded_above": {
-                  "py/id": 31
+                  "py/id": 61
                 },
                 "bounded_below": {
                   "dtype": "bool",
@@ -1300,7 +1438,7 @@
                   "value": true
                 },
                 "dtype": {
-                  "py/id": 17
+                  "py/id": 55
                 },
                 "high": {
                   "dtype": "int32",
@@ -1325,15 +1463,22 @@
         "py/object": "ray.rllib.policy.policy.PolicySpec"
       }
     },
-    "policies_to_train": [],
+    "policies_to_train": [
+      "assistant"
+    ],
     "policy_loss_coeff": 1,
     "policy_map_cache": -1,
     "policy_map_capacity": 100,
+    "policy_mapping_fn": {
+      "py/function": "mbag.scripts.train.policy_mapping_fn"
+    },
     "policy_states_are_swappable": false,
     "postprocess_inputs": false,
     "preprocessor_pref": "deepmind",
     "pretrain": false,
     "prev_goal_kl_coeff": 0,
+    "prev_goal_kl_coeff_schedule": null,
+    "prev_policy_kl_coeff": 0,
     "prioritized_replay": -1,
     "prioritized_replay_alpha": -1,
     "prioritized_replay_beta": -1,
@@ -1355,6 +1500,7 @@
       "capacity": 10,
       "replay_sequence_length": 0,
       "replay_sequence_override": false,
+      "replay_zero_init_states": false,
       "storage_unit": {
         "py/reduce": [
           {
@@ -1367,7 +1513,9 @@
           }
         ]
       },
-      "type": "MultiAgentReplayBuffer"
+      "type": {
+        "py/type": "mbag.rllib.alpha_zero.replay_buffer.FixedMultiAgentReplayBuffer"
+      }
     },
     "replay_mode": -1,
     "replay_sequence_length": null,
@@ -1379,6 +1527,7 @@
     "sample_collector": {
       "py/type": "ray.rllib.evaluation.collectors.simple_list_collector.SimpleListCollector"
     },
+    "sample_freq": 1,
     "sampler_perf_stats_ema_coef": null,
     "seed": 0,
     "sgd_minibatch_size": 128,
@@ -1424,6 +1573,7 @@
     "use_critic": false,
     "use_goal_predictor": false,
     "use_model_replay_buffer": false,
+    "use_other_agent_action_predictor": true,
     "use_replay_buffer": true,
     "use_worker_filter_stats": true,
     "validate_workers_after_construction": true,
@@ -1431,6 +1581,142 @@
     "worker_cls": -1,
     "worker_health_probe_timeout_s": 60,
     "worker_restore_timeout_s": 1800
+  },
+  "conv_config": {
+    "dropout": 0.0,
+    "embedding_size": 16,
+    "env_config": {
+      "abilities": {
+        "flying": true,
+        "inf_blocks": true,
+        "teleportation": false
+      },
+      "goal_generator": {
+        "py/type": "mbag.environment.goals.goal_transform.TransformedGoalGenerator"
+      },
+      "goal_generator_config": {
+        "goal_generator": "craftassist",
+        "goal_generator_config": {
+          "subset": "test"
+        },
+        "transforms": [
+          {
+            "config": {
+              "connectivity": 18
+            },
+            "transform": "largest_cc"
+          },
+          {
+            "transform": "crop_air"
+          },
+          {
+            "config": {
+              "density_threshold": 0.1
+            },
+            "transform": "crop_low_density_bottom_layers"
+          },
+          {
+            "config": {
+              "min_size": [
+                4,
+                4,
+                4
+              ]
+            },
+            "transform": "min_size_filter"
+          },
+          {
+            "config": {
+              "interpolate": true,
+              "interpolation_order": 1,
+              "max_scaling_factor": 2,
+              "max_scaling_factor_ratio": 1.5,
+              "preserve_paths": true,
+              "scale_y_independently": true
+            },
+            "transform": "area_sample"
+          },
+          {
+            "config": {
+              "max_density": 1,
+              "min_density": 0
+            },
+            "transform": "density_filter"
+          },
+          {
+            "transform": "randomly_place"
+          },
+          {
+            "transform": "add_grass"
+          },
+          {
+            "config": {
+              "connectivity": 18
+            },
+            "transform": "single_cc_filter"
+          }
+        ]
+      },
+      "horizon": 1500,
+      "malmo": {
+        "use_malmo": false
+      },
+      "num_players": 2,
+      "players": [
+        {
+          "goal_visible": true,
+          "is_human": false,
+          "player_name": "human",
+          "rewards": {},
+          "timestep_skip": 1
+        },
+        {
+          "goal_visible": true,
+          "is_human": false,
+          "player_name": "assistant",
+          "rewards": {},
+          "timestep_skip": 1
+        }
+      ],
+      "random_start_locations": true,
+      "randomize_first_episode_length": true,
+      "rewards": {
+        "action": 0,
+        "get_resources": 0,
+        "incorrect_action": 0,
+        "noop": 0,
+        "own_reward_prop": 0,
+        "place_wrong": -1
+      },
+      "truncate_on_no_progress_timesteps": null,
+      "world_size": [
+        11,
+        10,
+        10
+      ]
+    },
+    "filter_size": 5,
+    "hidden_channels": 64,
+    "hidden_size": 64,
+    "interleave_lstm_every": -1,
+    "line_of_sight_masking": true,
+    "lstm_size": 64,
+    "mask_action_distribution": true,
+    "mask_goal": false,
+    "mask_other_players": false,
+    "num_action_layers": 2,
+    "num_conv_1_layers": 1,
+    "num_inventory_obs": 2,
+    "num_layers": 6,
+    "num_value_layers": 2,
+    "scale_obs": true,
+    "use_extra_features": true,
+    "use_fc_after_embedding": true,
+    "use_groupnorm": false,
+    "use_prev_action": false,
+    "use_prev_blocks": false,
+    "use_resnet": true,
+    "vf_scale": 1.0
   },
   "crop": false,
   "crop_air": true,
@@ -1440,18 +1726,30 @@
     "density_threshold": 0.1
   },
   "custom_action_dist": "categorical_no_inf",
-  "data_split": null,
+  "data_split": "combined",
   "density_config": {
     "max_density": 1,
     "min_density": 0
   },
   "depth": 10,
+  "dim_feedforward": 64,
   "dirichlet_action_subtype_noise_multiplier": 10,
   "dirichlet_epsilon": 0.25,
   "dirichlet_noise": 0.25,
-  "embedding_size": 8,
+  "dropout": 0.0,
+  "embedding_size": 16,
   "entropy_coeff_end": 0,
   "entropy_coeff_horizon": 100000.0,
+  "entropy_coeff_schedule": [
+    [
+      0,
+      0
+    ],
+    [
+      100000.0,
+      0
+    ]
+  ],
   "entropy_coeff_start": 0,
   "environment_name": "MBAGFlatActions-v1",
   "environment_params": {
@@ -1530,12 +1828,19 @@
     "malmo": {
       "use_malmo": false
     },
-    "num_players": 1,
+    "num_players": 2,
     "players": [
       {
         "goal_visible": true,
         "is_human": false,
         "player_name": "human",
+        "rewards": {},
+        "timestep_skip": 1
+      },
+      {
+        "goal_visible": true,
+        "is_human": false,
+        "player_name": "assistant",
         "rewards": {},
         "timestep_skip": 1
       }
@@ -1545,6 +1850,7 @@
     "rewards": {
       "action": 0,
       "get_resources": 0,
+      "incorrect_action": 0,
       "noop": 0,
       "own_reward_prop": 0,
       "place_wrong": -1
@@ -1558,6 +1864,21 @@
   },
   "evaluation_config": {
     "env_config": {
+      "num_players": 2,
+      "players": [
+        {
+          "goal_visible": true,
+          "is_human": false,
+          "rewards": {},
+          "timestep_skip": 1
+        },
+        {
+          "goal_visible": true,
+          "is_human": false,
+          "rewards": {},
+          "timestep_skip": 1
+        }
+      ],
       "randomize_first_episode_length": false
     },
     "explore": true,
@@ -1576,31 +1897,37 @@
     "explore_noops": false,
     "fix_bilevel_action_selection": true,
     "init_q_with_max": false,
-    "num_simulations": 100,
+    "num_simulations": 30,
     "predict_goal_using_average": false,
+    "predict_goal_using_future_states": false,
     "predict_goal_using_next_state": false,
     "prior_temperature": 1,
-    "puct_coefficient": 10,
+    "puct_coefficient": 30,
+    "sample_c_puct_every_timestep": true,
     "sample_from_full_support_policy": true,
+    "store_model_state_in_torch": false,
     "temperature": 1,
     "temperature_schedule": null,
     "use_bilevel_action_selection": true
   },
+  "evaluation_num_players": 2,
   "evaluation_num_workers": 0,
-  "experiment_dir": "data/logs/MbagAlphaZero/self_play/11x10x10/craftassist/bc_to_az/teleportation_False/inf_blocks_True/split_human_alone/model_6x64/lr_0.001/sim_100/puct_coeff_10/seed_0/2024-07-17_02-27-57",
+  "expected_own_reward_scale": 1.0,
+  "expected_reward_shift": 0.0,
+  "experiment_dir": "data/logs/MbagAlphaZero/2_players/11x10x10/craftassist/pikl/infinite_blocks_true/bc_combined_lstm_prev_action_20250113_40/30_sims_puct_30/2025-01-14_22-39-07",
   "experiment_name_parts": [
     "MbagAlphaZero",
-    "self_play",
+    "2_players",
     "11x10x10",
     "craftassist",
-    "bc_to_az/teleportation_False/inf_blocks_True/split_human_alone/model_6x64/lr_0.001/sim_100/puct_coeff_10/seed_0",
-    "2024-07-17_02-27-57"
+    "pikl/infinite_blocks_true/bc_combined_lstm_prev_action_20250113_40/30_sims_puct_30",
+    "2025-01-14_22-39-07"
   ],
-  "experiment_tag": "bc_to_az/teleportation_False/inf_blocks_True/split_human_alone/model_6x64/lr_0.001/sim_100/puct_coeff_10/seed_0",
+  "experiment_tag": "pikl/infinite_blocks_true/bc_combined_lstm_prev_action_20250113_40/30_sims_puct_30",
   "explore_noops": false,
   "extract_largest_cc": true,
   "extract_largest_cc_connectivity": 18,
-  "filter_size": 3,
+  "filter_size": 5,
   "fix_bilevel_action_selection": true,
   "flying": true,
   "force_single_cc": true,
@@ -1672,6 +1999,7 @@
     }
   ],
   "goal_visibility": [
+    true,
     true
   ],
   "grad_clip": 10,
@@ -1680,11 +2008,14 @@
   "hidden_channels": 64,
   "hidden_size": 64,
   "horizon": 1500,
+  "incorrect_action_reward": 0,
   "inf_blocks": true,
   "init_q_with_max": false,
   "input": "sampler",
   "interleave_lstm": false,
+  "interleave_lstm_every": -1,
   "is_human": [
+    false,
     false
   ],
   "key": "human",
@@ -1699,12 +2030,13 @@
   "lr": 0.001,
   "lr_schedule": null,
   "lr_start": null,
-  "lstm_depth": null,
+  "lstm_size": 64,
   "mask_action_distribution": true,
   "mask_goal": false,
-  "mask_other_players": true,
+  "mask_other_players": false,
   "max_density": 1,
   "max_seq_len": 1500,
+  "mcts_batch_size": null,
   "mcts_config": {
     "add_dirichlet_noise": false,
     "argmax_tree_policy": false,
@@ -1714,12 +2046,15 @@
     "explore_noops": false,
     "fix_bilevel_action_selection": true,
     "init_q_with_max": false,
-    "num_simulations": 100,
+    "num_simulations": 30,
     "predict_goal_using_average": false,
+    "predict_goal_using_future_states": false,
     "predict_goal_using_next_state": false,
     "prior_temperature": 1,
-    "puct_coefficient": 10,
+    "puct_coefficient": 30,
+    "sample_c_puct_every_timestep": true,
     "sample_from_full_support_policy": true,
+    "store_model_state_in_torch": false,
     "temperature": 1,
     "temperature_schedule": null,
     "use_bilevel_action_selection": true
@@ -1736,12 +2071,13 @@
   },
   "min_width": 4,
   "mirror": false,
-  "model": "transformer",
+  "model": "convolutional",
   "model_config": {
     "custom_action_dist": "categorical_no_inf",
-    "custom_model": "mbag_transformer_model",
+    "custom_model": "mbag_convolutional_model",
     "custom_model_config": {
-      "embedding_size": 8,
+      "dropout": 0.0,
+      "embedding_size": 16,
       "env_config": {
         "abilities": {
           "flying": true,
@@ -1818,12 +2154,19 @@
         "malmo": {
           "use_malmo": false
         },
-        "num_players": 1,
+        "num_players": 2,
         "players": [
           {
             "goal_visible": true,
             "is_human": false,
             "player_name": "human",
+            "rewards": {},
+            "timestep_skip": 1
+          },
+          {
+            "goal_visible": true,
+            "is_human": false,
+            "player_name": "assistant",
             "rewards": {},
             "timestep_skip": 1
           }
@@ -1833,6 +2176,7 @@
         "rewards": {
           "action": 0,
           "get_resources": 0,
+          "incorrect_action": 0,
           "noop": 0,
           "own_reward_prop": 0,
           "place_wrong": -1
@@ -1844,31 +2188,37 @@
           10
         ]
       },
+      "filter_size": 5,
+      "hidden_channels": 64,
       "hidden_size": 64,
-      "interleave_lstm": false,
+      "interleave_lstm_every": -1,
       "line_of_sight_masking": true,
-      "lstm_depth": null,
+      "lstm_size": 64,
       "mask_action_distribution": true,
       "mask_goal": false,
-      "mask_other_players": true,
+      "mask_other_players": false,
       "num_action_layers": 2,
-      "num_heads": 4,
+      "num_conv_1_layers": 1,
+      "num_inventory_obs": 2,
       "num_layers": 6,
-      "num_lstm_layers": 1,
       "num_value_layers": 2,
-      "position_embedding_size": 18,
       "scale_obs": true,
       "use_extra_features": true,
-      "use_per_location_lstm": false,
+      "use_fc_after_embedding": true,
+      "use_groupnorm": false,
+      "use_prev_action": false,
       "use_prev_blocks": false,
-      "use_separated_transformer": true,
+      "use_resnet": true,
       "vf_scale": 1.0
     },
     "max_seq_len": 1500,
     "vf_share_layers": true
   },
-  "multiagent_mode": "self_play",
+  "model_replay_buffer_size": 10,
+  "model_replay_buffer_storage_probability": 0.1,
+  "model_train_batch_size": 10000,
   "noop_reward": 0,
+  "norm_first": false,
   "num_action_layers": 2,
   "num_conv_1_layers": 1,
   "num_cpus_per_worker": 0.5,
@@ -1877,20 +2227,21 @@
   "num_gpus": 1.0,
   "num_gpus_per_worker": 0.0,
   "num_heads": 4,
+  "num_inventory_obs": 2,
   "num_layers": 6,
   "num_lstm_layers": 1,
-  "num_players": 1,
+  "num_players": 2,
+  "num_res_blocks": 1,
   "num_sgd_iter": 1,
-  "num_simulations": 100,
+  "num_simulations": 30,
   "num_training_iters": 0,
-  "num_unet_layers": 0,
   "num_value_layers": 2,
   "num_workers": 0,
   "observation_space": {
-    "py/id": 45
+    "py/id": 47
   },
   "observer": {
-    "basedir": "data/logs/MbagAlphaZero/self_play/11x10x10/craftassist/bc_to_az/teleportation_False/inf_blocks_True/split_human_alone/model_6x64/lr_0.001/sim_100/puct_coeff_10/seed_0/2024-07-17_02-27-57",
+    "basedir": "data/logs/MbagAlphaZero/2_players/11x10x10/craftassist/pikl/infinite_blocks_true/bc_combined_lstm_prev_action_20250113_40/30_sims_puct_30/2025-01-14_22-39-07",
     "config": {
       "py/id": 0
     },
@@ -1898,7 +2249,7 @@
     "copy_sources": true,
     "cout": "",
     "cout_write_cursor": 0,
-    "dir": "data/logs/MbagAlphaZero/self_play/11x10x10/craftassist/bc_to_az/teleportation_False/inf_blocks_True/split_human_alone/model_6x64/lr_0.001/sim_100/puct_coeff_10/seed_0/2024-07-17_02-27-57/1",
+    "dir": "data/logs/MbagAlphaZero/2_players/11x10x10/craftassist/pikl/infinite_blocks_true/bc_combined_lstm_prev_action_20250113_40/30_sims_puct_30/2025-01-14_22-39-07/1",
     "info": {},
     "priority": 20,
     "py/object": "__main__.NoTypeAnnotationsFileStorageObserver",
@@ -1912,19 +2263,14 @@
             "data",
             "logs",
             "MbagAlphaZero",
-            "self_play",
+            "2_players",
             "11x10x10",
             "craftassist",
-            "bc_to_az",
-            "teleportation_False",
-            "inf_blocks_True",
-            "split_human_alone",
-            "model_6x64",
-            "lr_0.001",
-            "sim_100",
-            "puct_coeff_10",
-            "seed_0",
-            "2024-07-17_02-27-57",
+            "pikl",
+            "infinite_blocks_true",
+            "bc_combined_lstm_prev_action_20250113_40",
+            "30_sims_puct_30",
+            "2025-01-14_22-39-07",
             "_resources"
           ]
         }
@@ -1934,10 +2280,10 @@
       "artifacts": [],
       "command": "main",
       "experiment": {
-        "base_dir": "/nas/ucb/ebronstein/minecraft-building-assistance-game/mbag/scripts",
+        "base_dir": "/nas/ucb/cassidy/minecraft-building-assistance-game/mbag/scripts",
         "dependencies": [
           "gymnasium==0.28.1",
-          "mbag==0.0.1",
+          "minecraft-building-assistance-game==0.0.1",
           "numpy==1.21.6",
           "ray==2.7.1",
           "sacred==0.8.4",
@@ -1947,19 +2293,19 @@
         "name": "train_mbag",
         "repositories": [
           {
-            "commit": "4f9c0890926d68315f654942d08f888c275ac23b",
+            "commit": "11e494b78bcbf465c92a7f066fc30053ec54ea56",
             "dirty": true,
-            "url": "git@github.com:cassidylaidlaw/minecraft-building-assistance-game.git"
+            "url": "https://github.com/cassidylaidlaw/minecraft-building-assistance-game"
           },
           {
-            "commit": "4f9c0890926d68315f654942d08f888c275ac23b",
+            "commit": "11e494b78bcbf465c92a7f066fc30053ec54ea56",
             "dirty": true,
-            "url": "git@github.com:cassidylaidlaw/minecraft-building-assistance-game.git"
+            "url": "https://github.com/cassidylaidlaw/minecraft-building-assistance-game"
           },
           {
-            "commit": "4f9c0890926d68315f654942d08f888c275ac23b",
+            "commit": "11e494b78bcbf465c92a7f066fc30053ec54ea56",
             "dirty": true,
-            "url": "git@github.com:cassidylaidlaw/minecraft-building-assistance-game.git"
+            "url": "https://github.com/cassidylaidlaw/minecraft-building-assistance-game"
           }
         ],
         "sources": [
@@ -1969,11 +2315,11 @@
           ],
           [
             "train.py",
-            "_sources/train_965cfe60344cfc7e74d6f41a48328e53.py"
+            "_sources/train_69dd2d53da4718c6caf281aa21f63161.py"
           ],
           [
             "train_configs.py",
-            "_sources/train_configs_5f9cdf49b450884ed513be7e3dacd8c6.py"
+            "_sources/train_configs_cd0447f684f0759ad20dcac5035b1fcf.py"
           ]
         ]
       },
@@ -1985,75 +2331,64 @@
           "driver_version": "535.104.12",
           "gpus": [
             {
-              "model": "NVIDIA RTX A4000",
+              "model": "NVIDIA RTX A6000",
               "persistence_mode": true,
-              "total_memory": 16376
+              "total_memory": 49140
+            },
+            {
+              "model": "NVIDIA RTX A6000",
+              "persistence_mode": true,
+              "total_memory": 49140
+            },
+            {
+              "model": "NVIDIA RTX A6000",
+              "persistence_mode": true,
+              "total_memory": 49140
+            },
+            {
+              "model": "NVIDIA RTX A6000",
+              "persistence_mode": true,
+              "total_memory": 49140
+            },
+            {
+              "model": "NVIDIA RTX A6000",
+              "persistence_mode": true,
+              "total_memory": 49140
+            },
+            {
+              "model": "NVIDIA RTX A6000",
+              "persistence_mode": true,
+              "total_memory": 49140
+            },
+            {
+              "model": "NVIDIA RTX A6000",
+              "persistence_mode": true,
+              "total_memory": 49140
+            },
+            {
+              "model": "NVIDIA RTX A6000",
+              "persistence_mode": true,
+              "total_memory": 49140
             }
           ]
         },
-        "hostname": "vae.ist.berkeley.edu",
+        "hostname": "rnn.ist.berkeley.edu",
         "os": [
           "Linux",
-          "Linux-5.4.0-187-generic-x86_64-with-glibc2.17"
+          "Linux-5.4.0-204-generic-x86_64-with-glibc2.31"
         ],
-        "python_version": "3.8.18"
+        "python_version": "3.9.18"
       },
       "meta": {
         "command": "main",
         "config_updates": {
-          "add_dirichlet_noise": false,
-          "argmax_tree_policy": false,
-          "checkpoint_to_load_policies": "/nas/ucb/ebronstein/minecraft-building-assistance-game/data/logs/BC/self_play/11x10x10/craftassist/teleportation_False/inf_blocks_True/split_human_alone/lr_0.001/seed_0/361299/2024-06-04_03-19-30/1/checkpoint_000020",
-          "depth": 10,
-          "evaluation_explore": true,
-          "experiment_tag": "bc_to_az/teleportation_False/inf_blocks_True/split_human_alone/model_6x64/lr_0.001/sim_100/puct_coeff_10/seed_0",
-          "explore_noops": false,
-          "fix_bilevel_action_selection": true,
-          "gamma": 0.95,
-          "goal_generator": "craftassist",
-          "goal_subset": "test",
-          "height": 10,
-          "hidden_channels": 64,
-          "horizon": 1500,
-          "inf_blocks": true,
-          "init_q_with_max": false,
-          "is_human": {
-            "py/id": 121
-          },
-          "load_config_from_checkpoint": false,
-          "load_policies_mapping": {
-            "human": "human"
-          },
-          "mask_action_distribution": true,
-          "mcts_config": {
-            "temperature_schedule": null
-          },
-          "model": "transformer",
-          "num_layers": 6,
-          "num_sgd_iter": 1,
-          "num_simulations": 100,
-          "num_training_iters": 0,
-          "num_workers": 0,
-          "overwrite_loaded_policy_type": true,
-          "prior_temperature": 1,
-          "puct_coefficient": 10,
-          "run": "MbagAlphaZero",
-          "sample_from_full_support_policy": true,
-          "scale_obs": true,
-          "sgd_minibatch_size": 128,
-          "teleportation": false,
-          "temperature": 1,
-          "train_batch_size": 10000,
-          "truncate_on_no_progress_timesteps": null,
-          "use_bilevel_action_selection": true,
-          "use_critic": false,
-          "use_extra_features": true,
-          "use_goal_predictor": false,
-          "use_separated_transformer": true,
-          "vf_share_layers": true,
-          "width": 11
+          "checkpoint_name": "bc_combined_lstm_prev_action_20250113_40",
+          "checkpoint_to_load_policies": "/nas/ucb/cassidy/minecraft-building-assistance-game/data/logs/BC/2_players/11x10x10/craftassist/bc_human/lr_0.001/infinite_blocks_true/combined/lstm/use_prev_action/2025-01-13_00-47-16/1/checkpoint_000040",
+          "data_split": "combined"
         },
-        "named_configs": [],
+        "named_configs": [
+          "pikl"
+        ],
         "options": {
           "--beat-interval": null,
           "--capture": null,
@@ -2077,59 +2412,17 @@
           "--unobserved": false,
           "COMMAND": null,
           "UPDATE": [
-            "run=MbagAlphaZero",
-            "num_training_iters=0",
-            "train_batch_size=10000",
-            "use_extra_features=True",
-            "num_workers=0",
-            "overwrite_loaded_policy_type=True",
-            "goal_generator=craftassist",
-            "width=11",
-            "height=10",
-            "depth=10",
-            "gamma=0.95",
-            "model=transformer",
-            "hidden_channels=64",
-            "sgd_minibatch_size=128",
-            "use_separated_transformer=True",
-            "num_layers=6",
-            "vf_share_layers=True",
-            "num_sgd_iter=1",
-            "inf_blocks=True",
-            "teleportation=False",
-            "horizon=1500",
-            "mask_action_distribution=True",
-            "evaluation_explore=True",
-            "scale_obs=True",
-            "load_policies_mapping={\"human\": \"human\"}",
-            "is_human=[False]",
-            "checkpoint_to_load_policies=/nas/ucb/ebronstein/minecraft-building-assistance-game/data/logs/BC/self_play/11x10x10/craftassist/teleportation_False/inf_blocks_True/split_human_alone/lr_0.001/seed_0/361299/2024-06-04_03-19-30/1/checkpoint_000020",
-            "load_config_from_checkpoint=False",
-            "experiment_tag=bc_to_az/teleportation_False/inf_blocks_True/split_human_alone/model_6x64/lr_0.001/sim_100/puct_coeff_10/seed_0",
-            "num_simulations=100",
-            "puct_coefficient=10",
-            "temperature=1",
-            "add_dirichlet_noise=False",
-            "mcts_config.temperature_schedule=None",
-            "argmax_tree_policy=False",
-            "use_bilevel_action_selection=True",
-            "fix_bilevel_action_selection=True",
-            "prior_temperature=1",
-            "explore_noops=False",
-            "init_q_with_max=False",
-            "sample_from_full_support_policy=True",
-            "use_goal_predictor=False",
-            "use_critic=False",
-            "horizon=1500",
-            "truncate_on_no_progress_timesteps=None",
-            "goal_subset=test"
+            "pikl",
+            "checkpoint_to_load_policies=/nas/ucb/cassidy/minecraft-building-assistance-game/data/logs/BC/2_players/11x10x10/craftassist/bc_human/lr_0.001/infinite_blocks_true/combined/lstm/use_prev_action/2025-01-13_00-47-16/1/checkpoint_000040",
+            "checkpoint_name=bc_combined_lstm_prev_action_20250113_40",
+            "data_split=combined"
           ],
           "help": false,
           "with": true
         }
       },
       "resources": [],
-      "start_time": "2024-07-17T02:27:57.773556",
+      "start_time": "2025-01-15T06:39:09.097062",
       "status": "RUNNING"
     },
     "source_dir": {
@@ -2142,19 +2435,14 @@
             "data",
             "logs",
             "MbagAlphaZero",
-            "self_play",
+            "2_players",
             "11x10x10",
             "craftassist",
-            "bc_to_az",
-            "teleportation_False",
-            "inf_blocks_True",
-            "split_human_alone",
-            "model_6x64",
-            "lr_0.001",
-            "sim_100",
-            "puct_coeff_10",
-            "seed_0",
-            "2024-07-17_02-27-57",
+            "pikl",
+            "infinite_blocks_true",
+            "bc_combined_lstm_prev_action_20250113_40",
+            "30_sims_puct_30",
+            "2025-01-14_22-39-07",
             "_sources"
           ]
         }
@@ -2164,11 +2452,13 @@
   },
   "old_policy_id": "human",
   "other_agent_action_predictor_loss_coeff": 1.0,
+  "output": null,
   "overwrite_loaded_policy_model": false,
   "overwrite_loaded_policy_type": true,
   "own_reward_prop": 0,
   "per_player_action_reward": null,
   "per_player_get_resources_reward": null,
+  "per_player_incorrect_action_reward": null,
   "per_player_noop_reward": null,
   "per_player_own_reward_prop": null,
   "per_player_place_wrong_reward": null,
@@ -2188,15 +2478,27 @@
       "is_human": false,
       "rewards": {},
       "timestep_skip": 1
+    },
+    {
+      "goal_visible": true,
+      "is_human": false,
+      "rewards": {},
+      "timestep_skip": 1
     }
   ],
-  "player_index": 0,
+  "player_index": 1,
+  "players_str": "2_players",
   "policies": {
+    "assistant": {
+      "py/id": 100
+    },
     "human": {
-      "py/id": 44
+      "py/id": 46
     }
   },
-  "policies_to_train": [],
+  "policies_to_train": [
+    "assistant"
+  ],
   "policy_class": {
     "py/type": "mbag.rllib.alpha_zero.alpha_zero_policy.MbagAlphaZeroPolicy"
   },
@@ -2204,9 +2506,10 @@
     "goal_loss_coeff": 0.5,
     "model": {
       "custom_action_dist": "categorical_no_inf",
-      "custom_model": "mbag_transformer_model",
+      "custom_model": "mbag_convolutional_model",
       "custom_model_config": {
-        "embedding_size": 8,
+        "dropout": 0.0,
+        "embedding_size": 16,
         "env_config": {
           "abilities": {
             "flying": true,
@@ -2283,12 +2586,19 @@
           "malmo": {
             "use_malmo": false
           },
-          "num_players": 1,
+          "num_players": 2,
           "players": [
             {
               "goal_visible": true,
               "is_human": false,
               "player_name": "human",
+              "rewards": {},
+              "timestep_skip": 1
+            },
+            {
+              "goal_visible": true,
+              "is_human": false,
+              "player_name": "assistant",
               "rewards": {},
               "timestep_skip": 1
             }
@@ -2298,6 +2608,7 @@
           "rewards": {
             "action": 0,
             "get_resources": 0,
+            "incorrect_action": 0,
             "noop": 0,
             "own_reward_prop": 0,
             "place_wrong": -1
@@ -2309,54 +2620,72 @@
             10
           ]
         },
+        "filter_size": 5,
+        "hidden_channels": 64,
         "hidden_size": 64,
-        "interleave_lstm": false,
+        "interleave_lstm_every": -1,
         "line_of_sight_masking": true,
-        "lstm_depth": null,
+        "lstm_size": 64,
         "mask_action_distribution": true,
         "mask_goal": false,
-        "mask_other_players": true,
+        "mask_other_players": false,
         "num_action_layers": 2,
-        "num_heads": 4,
+        "num_conv_1_layers": 1,
+        "num_inventory_obs": 2,
         "num_layers": 6,
-        "num_lstm_layers": 1,
         "num_value_layers": 2,
-        "position_embedding_size": 18,
         "scale_obs": true,
         "use_extra_features": true,
-        "use_per_location_lstm": false,
+        "use_fc_after_embedding": true,
+        "use_groupnorm": false,
+        "use_prev_action": false,
         "use_prev_blocks": false,
-        "use_separated_transformer": true,
+        "use_resnet": true,
         "vf_scale": 1.0
       },
       "max_seq_len": 1500,
       "vf_share_layers": true
     }
   },
-  "policy_id": "human",
+  "policy_id": "assistant",
   "policy_ids": [
-    "human"
+    "human",
+    "assistant"
   ],
   "policy_loss_coeff": 1,
-  "policy_spec": {
-    "py/id": 44
+  "policy_mapping_fn": {
+    "py/function": "mbag.scripts.train.policy_mapping_fn"
   },
-  "position_embedding_size": 18,
+  "policy_spec": {
+    "py/id": 46
+  },
+  "position_embedding_angle": 10,
+  "position_embedding_size": 48,
   "predict_goal_using_average": false,
+  "predict_goal_using_future_states": false,
   "predict_goal_using_next_state": false,
   "pretrain": false,
   "prev_goal_kl_coeff": 0,
+  "prev_goal_kl_coeff_schedule": null,
+  "prev_policy_kl_coeff": 0,
   "prior_temperature": 1,
-  "puct_coefficient": 10,
+  "puct_coefficient": 30,
+  "puct_str": "30",
   "random_start_locations": true,
   "randomize_first_episode_length": true,
   "ray_init_options": {},
   "remove_invisible_non_dirt": false,
   "replay_buffer_size": 10,
+  "replay_buffer_storage_unit": {
+    "py/id": 152
+  },
+  "resblock_updown": true,
   "reward_scale": 1.0,
   "rollout_fragment_length": 1500,
   "run": "MbagAlphaZero",
   "sample_batch_size": 5000,
+  "sample_c_puct_every_timestep": true,
+  "sample_freq": 1,
   "sample_from_full_support_policy": true,
   "save_freq": 25,
   "scale_obs": true,
@@ -2364,6 +2693,7 @@
   "sgd_minibatch_size": 128,
   "simple_optimizer": true,
   "size_str": "11x10x10",
+  "store_model_state_in_torch": false,
   "strict_mode": false,
   "teleportation": false,
   "temperature": 1,
@@ -2371,6 +2701,7 @@
   "temperature_horizon": 0,
   "temperature_start": 1,
   "timestep_skip": [
+    1,
     1
   ],
   "train_batch_size": 10000,
@@ -2437,133 +2768,7 @@
       }
     ]
   },
-  "transformer_config": {
-    "embedding_size": 8,
-    "env_config": {
-      "abilities": {
-        "flying": true,
-        "inf_blocks": true,
-        "teleportation": false
-      },
-      "goal_generator": {
-        "py/type": "mbag.environment.goals.goal_transform.TransformedGoalGenerator"
-      },
-      "goal_generator_config": {
-        "goal_generator": "craftassist",
-        "goal_generator_config": {
-          "subset": "test"
-        },
-        "transforms": [
-          {
-            "config": {
-              "connectivity": 18
-            },
-            "transform": "largest_cc"
-          },
-          {
-            "transform": "crop_air"
-          },
-          {
-            "config": {
-              "density_threshold": 0.1
-            },
-            "transform": "crop_low_density_bottom_layers"
-          },
-          {
-            "config": {
-              "min_size": [
-                4,
-                4,
-                4
-              ]
-            },
-            "transform": "min_size_filter"
-          },
-          {
-            "config": {
-              "interpolate": true,
-              "interpolation_order": 1,
-              "max_scaling_factor": 2,
-              "max_scaling_factor_ratio": 1.5,
-              "preserve_paths": true,
-              "scale_y_independently": true
-            },
-            "transform": "area_sample"
-          },
-          {
-            "config": {
-              "max_density": 1,
-              "min_density": 0
-            },
-            "transform": "density_filter"
-          },
-          {
-            "transform": "randomly_place"
-          },
-          {
-            "transform": "add_grass"
-          },
-          {
-            "config": {
-              "connectivity": 18
-            },
-            "transform": "single_cc_filter"
-          }
-        ]
-      },
-      "horizon": 1500,
-      "malmo": {
-        "use_malmo": false
-      },
-      "num_players": 1,
-      "players": [
-        {
-          "goal_visible": true,
-          "is_human": false,
-          "player_name": "human",
-          "rewards": {},
-          "timestep_skip": 1
-        }
-      ],
-      "random_start_locations": true,
-      "randomize_first_episode_length": true,
-      "rewards": {
-        "action": 0,
-        "get_resources": 0,
-        "noop": 0,
-        "own_reward_prop": 0,
-        "place_wrong": -1
-      },
-      "truncate_on_no_progress_timesteps": null,
-      "world_size": [
-        11,
-        10,
-        10
-      ]
-    },
-    "hidden_size": 64,
-    "interleave_lstm": false,
-    "line_of_sight_masking": true,
-    "lstm_depth": null,
-    "mask_action_distribution": true,
-    "mask_goal": false,
-    "mask_other_players": true,
-    "num_action_layers": 2,
-    "num_heads": 4,
-    "num_layers": 6,
-    "num_lstm_layers": 1,
-    "num_value_layers": 2,
-    "position_embedding_size": 18,
-    "scale_obs": true,
-    "use_extra_features": true,
-    "use_per_location_lstm": false,
-    "use_prev_blocks": false,
-    "use_separated_transformer": true,
-    "vf_scale": 1.0
-  },
   "truncate_on_no_progress_timesteps": null,
-  "unet_grow_factor": 2,
-  "unet_use_bn": false,
   "uniform_block_type": false,
   "unmapped_loaded_policy_dict": {
     "human": [
@@ -2571,18 +2776,19 @@
         "py/type": "mbag.rllib.bc.BCTorchPolicy"
       },
       {
-        "py/id": 302
+        "py/id": 355
       },
       {
-        "py/id": 70
+        "py/id": 64
       },
       {
         "goal_loss_coeff": 0.5,
         "model": {
           "custom_action_dist": "categorical_no_inf",
-          "custom_model": "mbag_transformer_model",
+          "custom_model": "mbag_convolutional_model",
           "custom_model_config": {
-            "embedding_size": 8,
+            "dropout": 0.7,
+            "embedding_size": 16,
             "env_config": {
               "abilities": {
                 "flying": true,
@@ -2659,12 +2865,18 @@
               "malmo": {
                 "use_malmo": false
               },
-              "num_players": 1,
+              "num_players": 2,
               "players": [
                 {
                   "goal_visible": true,
                   "is_human": false,
                   "player_name": "human",
+                  "rewards": {},
+                  "timestep_skip": 1
+                },
+                {
+                  "goal_visible": true,
+                  "is_human": false,
                   "rewards": {},
                   "timestep_skip": 1
                 }
@@ -2674,6 +2886,7 @@
               "rewards": {
                 "action": 0,
                 "get_resources": 0,
+                "incorrect_action": 0,
                 "noop": 0,
                 "own_reward_prop": 0,
                 "place_wrong": -1
@@ -2685,27 +2898,30 @@
                 10
               ]
             },
+            "filter_size": 5,
+            "hidden_channels": 64,
             "hidden_size": 64,
-            "interleave_lstm": false,
+            "interleave_lstm_every": 4,
             "line_of_sight_masking": true,
-            "lstm_depth": null,
+            "lstm_size": 64,
             "mask_action_distribution": true,
             "mask_goal": false,
-            "mask_other_players": true,
+            "mask_other_players": false,
             "num_action_layers": 2,
-            "num_heads": 4,
-            "num_layers": 6,
-            "num_lstm_layers": 1,
+            "num_conv_1_layers": 1,
+            "num_inventory_obs": 2,
+            "num_layers": 8,
             "num_value_layers": 2,
-            "position_embedding_size": 18,
             "scale_obs": true,
             "use_extra_features": true,
-            "use_per_location_lstm": false,
+            "use_fc_after_embedding": true,
+            "use_groupnorm": false,
+            "use_prev_action": true,
             "use_prev_blocks": false,
-            "use_separated_transformer": true,
+            "use_resnet": true,
             "vf_scale": 1.0
           },
-          "max_seq_len": 1500,
+          "max_seq_len": 64,
           "vf_share_layers": true
         }
       }
@@ -2715,16 +2931,24 @@
   "use_bilevel_action_selection": true,
   "use_critic": false,
   "use_extra_features": true,
+  "use_fc_after_embedding": true,
   "use_goal_predictor": false,
-  "use_per_location_lstm": false,
+  "use_groupnorm": false,
+  "use_lstm": false,
+  "use_model_replay_buffer": false,
+  "use_prev_action": false,
   "use_prev_blocks": false,
+  "use_prev_other_agent_action": false,
   "use_replay_buffer": true,
-  "use_resnet": false,
+  "use_resnet": true,
+  "use_scale_shift_norm": true,
   "use_separated_transformer": true,
   "validation_participant_ids": [],
+  "validation_prop": 0,
   "vf_loss_coeff": 0.01,
   "vf_scale": 1.0,
   "vf_share_layers": true,
   "wall": false,
+  "weight_decay": 0,
   "width": 11
 }
