@@ -63,7 +63,7 @@ class AddGrassTransform(GoalTransform):
     blocks.
     """
 
-    default_config: AddGrassTransformConfig = {"mode": "surround"}
+    default_config: AddGrassTransformConfig = {"mode": "replace"}
     config: AddGrassTransformConfig
 
     def generate_goal(self, size: WorldSize) -> MinecraftBlocks:
